@@ -11,6 +11,9 @@
 // ---------------------------------------------------------------------------
 const map = L.map("map_mission_filter");
 
+// Move the default zoom control out of topleft so the filter button sits there cleanly.
+map.zoomControl.setPosition("bottomright");
+
 const gmrt = L.tileLayer.wms(
   "https://www.gmrt.org/services/mapserver/wms_merc?",
   { layers: "GMRT" }
@@ -491,16 +494,22 @@ const FilterControl = L.Control.extend({
 const filterControl = new FilterControl({ position: "topleft" });
 filterControl.addTo(map);
 
-// Strip Leaflet's default control border/shadow from the filter control wrapper.
+// Strip Leaflet's default control border/shadow/margin from the filter control wrapper.
+// Leaflet adds the leaflet-control class to ctrl itself (the onAdd() return value),
+// not to its parent — so we reset ctrl directly, then walk up to clear parents too.
 setTimeout(function () {
   var ctrl = filterControl.getContainer();
-  if (ctrl && ctrl.parentElement) {
-    var lc = ctrl.parentElement;
-    if (lc.classList.contains("leaflet-control")) {
-      lc.style.cssText =
-        "background:transparent;border:none;box-shadow:none;" +
-        "margin:0;padding:0;width:auto;height:auto;min-height:0;min-width:0;";
-    }
+  if (ctrl) {
+    ctrl.style.background = "transparent";
+    ctrl.style.border = "none";
+    ctrl.style.boxShadow = "none";
+    ctrl.style.outline = "none";
+    ctrl.style.margin = "0";
+    ctrl.style.padding = "0";
+    ctrl.style.width = "auto";
+    ctrl.style.height = "auto";
+    ctrl.style.minWidth = "0";
+    ctrl.style.minHeight = "0";
   }
   var p = ctrl ? ctrl.parentElement : null;
   while (p && p !== document.body) {
@@ -551,9 +560,12 @@ var DrawSquareButton = L.Control.extend({
 
     var icon = L.DomUtil.create("i", "fa-regular fa-square", btn);
     icon.id = "draw-square-icon";
-    icon.style.cssText =
-      "font-size:22px;-webkit-text-stroke:2.5px #007bff;" +
-      "-webkit-text-fill-color:transparent;";
+    icon.style.fontSize = "22px";
+    icon.style.color = "#007bff";             // drives SVG currentColor fill
+    icon.style.webkitTextStroke = "2.5px #007bff";
+    icon.style.webkitTextFillColor = "transparent";
+    icon.style.textStroke = "2.5px #007bff";
+    icon.style.textFillColor = "transparent";
 
     L.DomEvent.disableClickPropagation(btn);
     L.DomEvent.on(btn, "click", function (e) {

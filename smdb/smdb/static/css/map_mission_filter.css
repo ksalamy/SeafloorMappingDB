@@ -6,10 +6,18 @@
  */
 
 /* ── Map container ──────────────────────────────────────────────────────── */
-html,
+html {
+  width: 100%;
+}
+
 #map_mission_filter {
   width: 100%;
-  top: 200px;
+  top: 150px;
+}
+
+/* Reset Leaflet's default margin on control wrappers (mirrors map.css) */
+.leaflet-control {
+  margin: 0;
 }
 
 /* ── Table chrome ───────────────────────────────────────────────────────── */
