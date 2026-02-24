@@ -353,9 +353,12 @@ class MissionTableView(FilterView, SingleTableView):
         qs = Mission.objects.select_related("expedition").all().order_by("name")
         search_geom = self._get_bbox_geom()
         if search_geom:
+            # Use the same predicates as the select/export API endpoints so that
+            # the table rows and the API results agree for the same bbox.
             qs = qs.filter(
-                Q(nav_track__bboverlaps=search_geom)
-                | Q(grid_bounds__bboverlaps=search_geom)
+                Q(nav_track__intersects=search_geom)
+                | Q(grid_bounds__intersects=search_geom)
+                | Q(start_point__within=search_geom)
             )
         return qs
 

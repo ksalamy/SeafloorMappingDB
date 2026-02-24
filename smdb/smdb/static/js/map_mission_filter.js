@@ -229,6 +229,16 @@ const FilterControl = L.Control.extend({
       clonedForm.action = window.location.pathname;
       clonedForm.style.display = "block";
 
+      // Suffix every id in the clone with "-sidebar" so they don't collide
+      // with the hidden original form's ids (duplicate IDs break label
+      // targeting and any querySelector/getElementById that assumes uniqueness).
+      clonedForm.querySelectorAll("[id]").forEach(function (el) {
+        el.id = el.id + "-sidebar";
+      });
+      clonedForm.querySelectorAll("label[for]").forEach(function (lbl) {
+        lbl.setAttribute("for", lbl.getAttribute("for") + "-sidebar");
+      });
+
       // Remove any onclick attributes left by crispy forms Clear buttons
       clonedForm.querySelectorAll("button").forEach(function (btn) {
         var onclick = btn.getAttribute("onclick");
