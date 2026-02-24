@@ -782,12 +782,12 @@ function updateResultsPanel(message, missions) {
       '/">' +
       _escapeHtml(m.name) +
       "</a></td>" +
-      "<td>" + (m.start_date || "-") + "</td>" +
-      "<td>" + (m.region_name || "-") + "</td>" +
-      "<td>" + (m.track_length || "-") + "</td>" +
-      "<td>" + (m.start_depth || "-") + "</td>" +
-      "<td>" + (m.vehicle_name || "-") + "</td>" +
-      "<td>" + (m.expedition_name || "-") + "</td>" +
+      "<td>" + (m.start_date ? _escapeHtml(String(m.start_date)) : "-") + "</td>" +
+      "<td>" + (m.region_name ? _escapeHtml(String(m.region_name)) : "-") + "</td>" +
+      "<td>" + (m.track_length ? _escapeHtml(String(m.track_length)) : "-") + "</td>" +
+      "<td>" + (m.start_depth ? _escapeHtml(String(m.start_depth)) : "-") + "</td>" +
+      "<td>" + (m.vehicle_name ? _escapeHtml(String(m.vehicle_name)) : "-") + "</td>" +
+      "<td>" + (m.expedition_name ? _escapeHtml(String(m.expedition_name)) : "-") + "</td>" +
       "</tr>";
   });
 

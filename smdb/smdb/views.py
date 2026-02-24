@@ -322,6 +322,43 @@ class MissionTableView(FilterView, SingleTableView):
     filterset_class = MissionFilter
     formhelper_class = MissionFilterSidebarHelper  # sidebar layout for the collapsible panel
 
+    def _get_bbox_geom(self):
+        """Parse xmin/xmax/ymin/ymax from request into a Polygon, or return None."""
+        if not self.request.GET.get("xmin"):
+            return None
+        try:
+            min_lon = float(self.request.GET["xmin"])
+            max_lon = float(self.request.GET["xmax"])
+            min_lat = float(self.request.GET["ymin"])
+            max_lat = float(self.request.GET["ymax"])
+            return Polygon(
+                (
+                    (min_lon, min_lat),
+                    (min_lon, max_lat),
+                    (max_lon, max_lat),
+                    (max_lon, min_lat),
+                    (min_lon, min_lat),
+                ),
+                srid=4326,
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    def get_queryset(self):
+        """Return base queryset with optional bbox pre-filter applied.
+
+        Applying the bbox here ensures both the rendered table (via FilterView)
+        and the map serializer in get_context_data() operate on the same rows.
+        """
+        qs = Mission.objects.select_related("expedition").all().order_by("name")
+        search_geom = self._get_bbox_geom()
+        if search_geom:
+            qs = qs.filter(
+                Q(nav_track__bboverlaps=search_geom)
+                | Q(grid_bounds__bboverlaps=search_geom)
+            )
+        return qs
+
     def get_filterset(self, filterset_class):
         kwargs = self.get_filterset_kwargs(filterset_class)
         filterset = filterset_class(**kwargs)
@@ -331,36 +368,10 @@ class MissionTableView(FilterView, SingleTableView):
     def get_context_data(self, *args, **kwargs):
         context = super().get_context_data(**kwargs)
 
-        missions = MissionFilter(
-            self.request.GET,
-            queryset=Mission.objects.select_related("expedition").all(),
-        ).qs
-
-        # Bounding-box filter from the draw-rectangle search tool.
-        # Parameters are populated by map_mission_filter.js via the
-        # /api/v1/missions/select endpoint, or directly in the URL.
-        if self.request.GET.get("xmin"):
-            try:
-                min_lon = float(self.request.GET.get("xmin"))
-                max_lon = float(self.request.GET.get("xmax"))
-                min_lat = float(self.request.GET.get("ymin"))
-                max_lat = float(self.request.GET.get("ymax"))
-                search_geom = Polygon(
-                    (
-                        (min_lon, min_lat),
-                        (min_lon, max_lat),
-                        (max_lon, max_lat),
-                        (max_lon, min_lat),
-                        (min_lon, min_lat),
-                    ),
-                    srid=4326,
-                )
-                missions = missions.filter(
-                    Q(nav_track__bboverlaps=search_geom)
-                    | Q(grid_bounds__bboverlaps=search_geom)
-                )
-            except (TypeError, ValueError):
-                pass  # Ignore malformed bbox params
+        # self.object_list is the filterset-filtered queryset set by FilterView
+        # before get_context_data() is called; it already incorporates both the
+        # MissionFilter fields and the bbox pre-filter from get_queryset().
+        missions = self.object_list
 
         sort = self.request.GET.get("sort")
         if sort:

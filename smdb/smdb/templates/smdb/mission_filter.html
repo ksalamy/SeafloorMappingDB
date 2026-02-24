@@ -47,6 +47,15 @@
       {% endif %}
     </div>
 
+    {# Fallback form rendered when JavaScript is disabled #}
+    <noscript>
+      {% if filter %}
+        <div class="mb-3">
+          {% crispy filter.form filter.form.helper %}
+        </div>
+      {% endif %}
+    </noscript>
+
     {{ missions|json_script:"missions-data" }}
     <div id="map_mission_filter" style="height: 500px;"></div>
     <script src="{% static 'js/map_mission_filter.js' %}"></script>
