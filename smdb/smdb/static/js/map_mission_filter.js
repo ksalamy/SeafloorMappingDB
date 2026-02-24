@@ -209,6 +209,10 @@ const FilterControl = L.Control.extend({
     // ------------------------------------------------------------------
     // copyForm — clone the hidden crispy form into the sidebar body
     // ------------------------------------------------------------------
+    // Guard flag: the body "Clear" listener must only be added once even
+    // if copyForm() is retried multiple times by the retry loop below.
+    var clearListenerAdded = false;
+
     const copyForm = function () {
       const formContainer = document.getElementById("filter-form-container");
       if (!formContainer) return false;
@@ -296,9 +300,13 @@ const FilterControl = L.Control.extend({
       }, 100);
 
       // Clear button: stay on Missions page, strip filter params.
-      body.addEventListener(
-        "click",
-        function (e) {
+      // Only attach once — copyForm() may be retried and would otherwise
+      // register duplicate handlers on each attempt.
+      if (!clearListenerAdded) {
+        clearListenerAdded = true;
+        body.addEventListener(
+          "click",
+          function (e) {
           var tgt = e.target;
           var isClear =
             tgt.type === "reset" ||
@@ -322,6 +330,7 @@ const FilterControl = L.Control.extend({
         },
         true
       );
+      } // end if (!clearListenerAdded)
 
       // Form submit: reload Missions page with filter params in URL.
       clonedForm.addEventListener("submit", function (e) {
