@@ -102,9 +102,11 @@ class MissionFilter(FilterSet):
             field_name="mgds_compilation",
             choices=[
                 (m, m)
-                for m in Mission.objects.values_list(
-                    "mgds_compilation", flat=True
-                ).distinct()
+                for m in Mission.objects.exclude(mgds_compilation__isnull=True)
+                .exclude(mgds_compilation="")
+                .values_list("mgds_compilation", flat=True)
+                .distinct()
+                .order_by("mgds_compilation")
             ],
             label="",
             empty_label="- MGDS_compilation -",
