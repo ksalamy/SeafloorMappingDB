@@ -870,7 +870,9 @@ function exportMissions(format) {
 
   var qs = Object.keys(filterParams)
     .map(function (k) {
-      return encodeURIComponent(k) + "=" + encodeURIComponent(filterParams[k]);
+      var v = filterParams[k];
+      var vStr = v != null ? String(v) : "";
+      return encodeURIComponent(k) + "=" + encodeURIComponent(vStr);
     })
     .join("&");
 
