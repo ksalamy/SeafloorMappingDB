@@ -349,12 +349,45 @@ class MissionTableView(FilterView, SingleTableView):
         sort = self.request.GET.get("sort")
         if sort:
             missions = missions.order_by(sort)
-        
+
+        # Apply bbox filtering for the map GeoJSON when the JS sends draw-rectangle bounds.
+        search_geom = None
+        if self.request.GET.get("xmin"):
+            try:
+                min_lon = float(self.request.GET.get("xmin"))
+                max_lon = float(self.request.GET.get("xmax"))
+                min_lat = float(self.request.GET.get("ymin"))
+                max_lat = float(self.request.GET.get("ymax"))
+                if (
+                    -180.0 <= min_lon <= 180.0
+                    and -180.0 <= max_lon <= 180.0
+                    and -90.0 <= min_lat <= 90.0
+                    and -90.0 <= max_lat <= 90.0
+                    and min_lon <= max_lon
+                    and min_lat <= max_lat
+                ):
+                    search_geom = Polygon(
+                        (
+                            (min_lon, min_lat),
+                            (min_lon, max_lat),
+                            (max_lon, max_lat),
+                            (max_lon, min_lat),
+                            (min_lon, min_lat),
+                        ),
+                        srid=4326,
+                    )
+            except (TypeError, ValueError):
+                pass
+        if search_geom:
+            missions = missions.filter(
+                Q(grid_bounds__intersects=search_geom)
+                | Q(nav_track__intersects=search_geom)
+                | Q(start_point__within=search_geom)
+            )
+
         # Filter to only missions with nav_track before pagination (for map display)
-        # This ensures the map shows track lines, not just bounding boxes
-        # Missions without nav_track will be filtered out by the serializer anyway
         missions = missions.filter(nav_track__isnull=False).exclude(nav_track__isempty=True)
-        
+
         per_page = int(self.request.GET.get("per_page", 10))
         page = int(self.request.GET.get("page", 1))
         missions = missions[slice((page - 1) * per_page, page * per_page)]
