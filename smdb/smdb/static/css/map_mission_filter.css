@@ -85,6 +85,15 @@ td {
   border: 1px solid rgba(0, 0, 0, 0.08);
 }
 
+/* Override project.css .leaflet-interactive:hover (cornflowerblue) for mission labels only. */
+#map_mission_filter .label-mission-name.leaflet-interactive:hover,
+#map_mission_filter .label-mission-name.leaflet-interactive:focus,
+#map_mission_filter .leaflet-marker-icon.label-mission-name:hover,
+#map_mission_filter .leaflet-marker-icon.label-mission-name:focus {
+  border: none;
+  box-shadow: none;
+}
+
 /* ── Utility ────────────────────────────────────────────────────────────── */
 .align-items-center {
   -ms-flex-align: center !important;
