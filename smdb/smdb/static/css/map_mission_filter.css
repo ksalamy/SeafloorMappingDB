@@ -76,12 +76,16 @@ td {
 
 /* Bidirectional hover (issue #293): when track/row hovered, label gets .smdb-hover. */
 /* Add background box only (no transform/scale) — Test A + follow-up. */
+/* z-index brings hovered label above overlapping labels; more opaque background for clarity at all zoom levels. */
+.label-mission-name.smdb-hover {
+  z-index: 1000;
+}
 .label-mission-name.smdb-hover a {
   display: inline-block;
   color: #0066aa;
   font-weight: 700;
   padding: 2px 6px 2px 8px;
-  background: rgba(255, 255, 255, 0.62);
+  background: rgba(255, 255, 255, 0.9);
   border-radius: 3px;
   border: 1px solid rgba(0, 0, 0, 0.08);
 }
@@ -113,6 +117,7 @@ path.leaflet-interactive.smdb-track-line.smdb-geometry-line:hover {
 /* Programmatic hover link (issue #293): track and row highlight together. */
 #map_mission_filter path.leaflet-interactive.smdb-track-line.smdb-geometry-line.smdb-hover {
   stroke: yellow;
+  stroke-width: 5;
 }
 .selection-results-panel tbody tr.smdb-hover,
 tbody tr.smdb-hover {
