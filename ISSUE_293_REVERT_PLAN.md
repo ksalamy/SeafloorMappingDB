@@ -4,6 +4,10 @@
 
 Branch `fix/issue-293-revert-investigate` is reset to **38e4a16** (code before any #293 changes).
 
+## Must-keep (non-negotiable)
+
+**Bidirectional hover styling** – Track ↔ label ↔ table row. When the user hovers any of these, all three highlight together (`.smdb-hover`). This must be preserved when re-applying #293.
+
 ## #293 commits (in order, for re-apply)
 
 | Order | Commit   | Description |
