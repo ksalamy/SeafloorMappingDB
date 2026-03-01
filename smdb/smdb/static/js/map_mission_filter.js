@@ -143,8 +143,6 @@ map.whenReady(function () {
 if (hasMissions && missions.features) {
   var labelPixelOffsetEast = 8;
   var labelPixelOffsetNorth = 8;
-  var labelIconHeight = 36;
-  var labelIconWidth = 280;
   var labelMissionEntries = [];
   /* Flatten to points [lng, lat]: support LineString or MultiLineString. */
   function flattenCoords(geometry) {
@@ -186,8 +184,6 @@ if (hasMissions && missions.features) {
     var marker = L.marker(anchor, {
       icon: L.divIcon({
         className: "label-mission-name",
-        iconSize: [labelIconWidth, labelIconHeight],
-        iconAnchor: [0, labelIconHeight],
         html:
           "<a target='_blank' href='/missions/" +
           (mission.properties.slug ? mission.properties.slug : "") +
