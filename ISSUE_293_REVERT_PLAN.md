@@ -6,7 +6,7 @@ Branch `fix/issue-293-revert-investigate` is at **a6399dc** (pre-#293 code).
 
 ## Known breakage (in #293)
 
-**Label placement on zoom out** – Labels become evenly spaced / nowhere near nav_track. Tried: (1) degree offset only; (2) zoom-conditional (pixel when zoom≥8, degree when zoomed out). Neither fixed it.
+**Label placement on zoom out** – Labels become evenly spaced / nowhere near nav_track. **Root cause: #293 styling** (iconSize/iconAnchor + #293 CSS). Test A proved: #293 placement + pre-#293 styling works. Test B proved: pre-#293 placement + #293 styling breaks. **Fix:** Keep Test A (commit d2bae69).
 
 ## Must-keep (non-negotiable)
 
