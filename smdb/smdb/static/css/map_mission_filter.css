@@ -65,7 +65,8 @@ td {
   white-space: nowrap;
   padding-left: 20px;
 }
-.label-mission-name a:link {
+.label-mission-name a:link,
+.label-mission-name a:visited {
   color: black;
 }
 
