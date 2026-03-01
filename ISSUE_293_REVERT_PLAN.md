@@ -2,7 +2,11 @@
 
 ## Current state
 
-Branch `fix/issue-293-revert-investigate` is reset to **38e4a16** (code before any #293 changes).
+Branch `fix/issue-293-revert-investigate` is at **a6399dc** (pre-#293 code).
+
+## Known breakage (in #293)
+
+**Label placement on zoom out** – Labels become evenly spaced / nowhere near nav_track. Tried: (1) degree offset only; (2) zoom-conditional (pixel when zoom≥8, degree when zoomed out). Neither fixed it.
 
 ## Must-keep (non-negotiable)
 
