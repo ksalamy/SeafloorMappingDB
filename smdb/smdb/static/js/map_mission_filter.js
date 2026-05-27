@@ -55,7 +55,7 @@ let feature = L.geoJSON(missions, {
 })
   .bindPopup(function (layer) {
     return (
-      "<a target='_blank' href='/missions/" +
+      "<a target='_blank' href='" + window.location.origin + '/missions/' +
       layer.feature.properties.slug +
       "'>" +
       layer.feature.properties.slug +
@@ -132,7 +132,7 @@ if (hasMissions && missions.features) {
       icon: L.divIcon({
         className: "label-mission-name",
         html:
-          "<a target='_blank' href='/missions/" +
+          "<a target='_blank' href='" + window.location.origin + '/missions/' +
           mission.properties.slug +
           "'>" +
           mission.properties.slug +
@@ -932,7 +932,7 @@ function updateResultsPanel(message, missions) {
   missions.forEach(function (m) {
     html +=
       "<tr>" +
-      '<td><a href="/missions/' +
+      '<td><a href="' + window.location.origin + '/missions/' +
       (m.slug ? encodeURIComponent(m.slug) : "") +
       '/">' +
       _escapeHtml(m.name) +

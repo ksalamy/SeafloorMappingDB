@@ -1413,7 +1413,7 @@ let feature = L.geoJSON(missions, {
         image_url = "static/images/No_ZTopoSlopeNav_image.jpg";
       }
       return (
-        "<a target='_blank' href='/missions/" +
+        "<a target='_blank' href='" + window.location.origin + '/missions/' +
         layer.feature.properties.slug +
         "'>" +
         "<img src='" +
@@ -2889,7 +2889,7 @@ function updateResultsPanel(message, missions) {
   
   missions.forEach(function(mission) {
     html += '<tr>';
-    html += '<td><a href="/missions/' + (mission.slug ? encodeURIComponent(mission.slug) : '') + '/">' + escapeHtml(mission.name) + '</a></td>';
+    html += '<td><a href="' + window.location.origin + '/missions/' + (mission.slug ? encodeURIComponent(mission.slug) : '') + '/">' + escapeHtml(mission.name) + '</a></td>';
     html += '<td>' + (mission.start_date || '-') + '</td>';
     html += '<td>' + (mission.region_name || '-') + '</td>';
     html += '<td>' + (mission.track_length || '-') + '</td>';
