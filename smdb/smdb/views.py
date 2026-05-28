@@ -150,7 +150,7 @@ class MissionOverView(TemplateView):
             for key in [
                 'region_name', 'vehicle_name', 'platformtype',
                 'quality_categories', 'patch_test', 'repeat_survey',
-                'mgds_compilation', 'expedition__name',
+                'mgds_compilation', 'expedition__name', 'citation',
             ]
         ) or (filter_type == 'mission' and 'name' in self.request.GET and self.request.GET.get('name'))
         
@@ -603,7 +603,7 @@ class MissionSelectAPIView(View):
             
             # Apply other filters if present (only when request has those filter keys)
             filter_type = filter_params.get('filter_type', '')
-            mission_filter_keys = ['name', 'region_name', 'quality_categories', 'patch_test', 'repeat_survey', 'mgds_compilation', 'expedition__name']
+            mission_filter_keys = ['name', 'region_name', 'vehicle_name', 'platformtype', 'quality_categories', 'patch_test', 'repeat_survey', 'mgds_compilation', 'expedition__name', 'citation']
             has_mission_filters = any(key in filter_params for key in mission_filter_keys)
             
             # Apply mission filter only when we have mission filter params (skip when only bbox/tmin/tmax)
@@ -738,7 +738,7 @@ class MissionExportAPIView(View):
             
             # Apply other filters (same logic as MissionSelectAPIView)
             filter_type = filter_params.get('filter_type', '')
-            mission_filter_keys = ['name', 'region_name', 'quality_categories', 'patch_test', 'repeat_survey', 'mgds_compilation', 'expedition__name']
+            mission_filter_keys = ['name', 'region_name', 'vehicle_name', 'platformtype', 'quality_categories', 'patch_test', 'repeat_survey', 'mgds_compilation', 'expedition__name', 'citation']
             has_mission_filters = any(key in filter_params for key in mission_filter_keys)
             if has_mission_filters and (filter_type == 'mission' or filter_type == ''):
                 mission_filter = MissionFilter(request.GET, queryset=missions)

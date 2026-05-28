@@ -789,7 +789,8 @@ map.on(L.Draw.Event.CREATED, function (e) {
   var urlParams = new URLSearchParams(window.location.search);
   var filterParams = {};
   [
-    "name", "region_name", "quality_categories", "patch_test",
+    "name", "region_name", "vehicle_name", "platformtype",
+    "quality_categories", "patch_test",
     "repeat_survey", "mgds_compilation", "citation", "expedition__name",
     "filter_type", "q", "tmin", "tmax",
   ].forEach(function (k) {
@@ -1001,7 +1002,8 @@ function exportMissions(format) {
   var urlParams = new URLSearchParams(window.location.search);
   var filterParams = {};
   [
-    "name", "region_name", "quality_categories", "patch_test",
+    "name", "region_name", "vehicle_name", "platformtype",
+    "quality_categories", "patch_test",
     "repeat_survey", "mgds_compilation", "citation", "expedition__name",
     "filter_type", "q", "tmin", "tmax",
   ].forEach(function (k) {

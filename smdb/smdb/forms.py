@@ -15,6 +15,7 @@ class MissionFilterFormHelper(FormHelper):
             Column("repeat_survey", css_class="form-group col-md mb-0"),
             Column("mgds_compilation", css_class="form-group col-md mb-0"),
             Column("expedition__name", css_class="form-group col-md mb-0"),
+            Column("citation", css_class="form-group col-md mb-0"),
             Column(Submit("submit", "Filter", css_id="missionFilterSubmit", css_class="col-md mb-0 btn-primary")),
             Column(
                 Reset(
@@ -95,6 +96,7 @@ class MissionFilterSidebarHelper(FormHelper):
         Div("repeat_survey", css_class="mb-3"),
         Div("mgds_compilation", css_class="mb-3"),
         Div("expedition__name", css_class="mb-3"),
+        Div("citation", css_class="mb-3"),
         # tmin and tmax are hidden fields, no need to include in layout
         # Buttons are created dynamically by JavaScript in map.js
         # Div(
