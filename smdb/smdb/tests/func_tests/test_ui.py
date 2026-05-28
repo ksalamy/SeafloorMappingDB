@@ -71,6 +71,11 @@ def test_leaflet_measure_tool_opens(chrome, live_server_url_for_selenium, missio
     assert len(measure_options) > 0, "Measure tool options should be visible"
 
 
+# Previously removed as a known failing test. Root cause was fixed: SliderControl.js
+# now guards against NaN timestamps (missions with null start_ems), preventing a
+# RangeError that halted map.js before the popup handler registered. See the NaN
+# guard in SliderControl.extractTimestamp and the try-catch around startSlider()
+# in map.js. Both tests are reliably green with those fixes in place.
 @pytest.mark.django_db
 @pytest.mark.selenium
 def test_leaflet_measure_completes_measurement(chrome, live_server_url_for_selenium, missions_notes_5):
