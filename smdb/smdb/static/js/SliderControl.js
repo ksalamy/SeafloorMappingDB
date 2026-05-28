@@ -25,9 +25,11 @@ L.Control.SliderControl = L.Control.extend({
 
   extractTimestamp: function (time, options) {
     if (options.isEpoch) {
-      //time = new Date(parseInt(time)).toUTCShortFormat();  // not a function ?
-      time = new Date(parseInt(time)).toISOString();
+      var ms = parseInt(time);
+      if (isNaN(ms)) { return ''; }
+      time = new Date(ms).toISOString();
     }
+    if (!time) { return ''; }
     return time.substr(
       options.startTimeIdx,
       options.startTimeIdx + options.timeStrLength

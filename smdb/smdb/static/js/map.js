@@ -2098,7 +2098,11 @@ var sliderControl = L.control.sliderControl({
 });
 map.addControl(sliderControl);
 $("#filter-center").html(sliderControl.getContainer());
-sliderControl.startSlider();
+try {
+  sliderControl.startSlider();
+} catch (e) {
+  console.warn('SliderControl.startSlider failed (likely null start_ems in data):', e);
+}
 
 // Determine which browser you are using and indicate and issue if needed using that browser
 function fnBrowserDetect() {
