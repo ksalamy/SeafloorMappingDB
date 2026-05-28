@@ -9,7 +9,8 @@
 // ---------------------------------------------------------------------------
 // Map and base tile layer
 // ---------------------------------------------------------------------------
-const map = L.map("map_mission_filter");
+// minZoom: 2 keeps at least one-world view (no multiple wraps); matches home page behavior.
+const map = L.map("map_mission_filter", { minZoom: 2, maxZoom: 18 });
 
 // Move the default zoom control out of topleft so the filter button sits there cleanly.
 map.zoomControl.setPosition("bottomright");
@@ -30,8 +31,96 @@ const missions = JSON.parse(
 const hasMissions =
   missions && missions.features && missions.features.length > 0;
 
-// Set an initial world view; whenReady() will zoom to mission bounds.
-map.setView([39.8423, -26.8945], 3, { animate: false });
+// One-world initial view. Use setView (not fitWorld) because fitWorld calls fitBounds internally
+// which requires the container to have non-zero dimensions — but the container often has size 0
+// at JS initialization time (CSS not yet applied). setView sets center+zoom directly without
+// needing container dimensions, avoiding the invalid-zoom bug.
+map.setView([0, 0], 2, { animate: false });
+
+// Track the currently highlighted mission to avoid full DOM scans on every hover.
+var currentHighlightedSlug = null;
+var highlightedLabelEls = [];
+var highlightedPathEls = [];
+var highlightedRowEls = [];
+// Debounce: pending clear timeout so moving from path to row doesn't flicker (cancel on re-highlight).
+var clearHighlightsTimeout = null;
+var CLEAR_DEBOUNCE_MS = 80;
+
+// Clear all mission hover state so only one mission is highlighted at a time (issue #293).
+function clearAllMissionHighlights() {
+  if (!currentHighlightedSlug) {
+    return;
+  }
+
+  highlightedLabelEls.forEach(function (el) {
+    el.classList.remove("smdb-hover");
+  });
+  highlightedPathEls.forEach(function (p) {
+    p.classList.remove("smdb-hover");
+  });
+  highlightedRowEls.forEach(function (tr) {
+    tr.classList.remove("smdb-hover");
+  });
+
+  highlightedLabelEls = [];
+  highlightedPathEls = [];
+  highlightedRowEls = [];
+  currentHighlightedSlug = null;
+}
+
+function highlightMission(slug) {
+  if (!slug) return;
+  if (clearHighlightsTimeout) {
+    clearTimeout(clearHighlightsTimeout);
+    clearHighlightsTimeout = null;
+  }
+  // If this mission is already highlighted, avoid redundant DOM work.
+  if (slug === currentHighlightedSlug) {
+    return;
+  }
+
+  clearAllMissionHighlights();
+  currentHighlightedSlug = slug;
+
+  // Escape for use inside double-quoted CSS attribute selector [attr="..."]:
+  // only \ and " need escaping (CSS.escape is for unquoted identifiers and breaks slugs with /).
+  var escapedSlug = slug.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+
+  highlightedLabelEls = Array.prototype.slice.call(
+    document.querySelectorAll('.label-mission-name[data-mission-slug="' + escapedSlug + '"]')
+  );
+  highlightedLabelEls.forEach(function (l) {
+    l.classList.add("smdb-hover");
+    var pane = l.closest(".leaflet-marker-pane");
+    if (pane) pane.appendChild(l);
+  });
+
+  var mapEl = document.getElementById("map_mission_filter");
+  highlightedPathEls = [];
+  if (mapEl) {
+    highlightedPathEls = Array.prototype.slice.call(
+      mapEl.querySelectorAll('path[data-mission-slug="' + escapedSlug + '"]')
+    );
+    highlightedPathEls.forEach(function (p) {
+      p.classList.add("smdb-hover");
+      var parent = p.parentNode;
+      if (parent) parent.appendChild(p);
+    });
+  }
+
+  highlightedRowEls = Array.prototype.slice.call(
+    document.querySelectorAll('tr[data-mission-slug="' + escapedSlug + '"]')
+  );
+  highlightedRowEls.forEach(function (tr) {
+    tr.classList.add("smdb-hover");
+  });
+
+  // Scroll the Crispy mission table row into view so the user sees the highlighted mission (issue #293).
+  var mainTableRow = document.querySelector(
+    '#mission-table-wrapper tr[data-mission-slug="' + escapedSlug + '"]'
+  );
+  if (mainTableRow) mainTableRow.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
 
 let feature = L.geoJSON(missions, {
   style: function () {
@@ -45,51 +134,68 @@ let feature = L.geoJSON(missions, {
     };
   },
   onEachFeature: function (feat, layer) {
-    // Assign CSS classes after the SVG path is created (not before).
+    var slug = (feat.properties && feat.properties.slug) ? feat.properties.slug : "";
     layer.on("add", function () {
       if (this._path) {
         this._path.classList.add("smdb-track-line", "smdb-geometry-line");
+        if (slug) this._path.setAttribute("data-mission-slug", slug);
+        this._path.addEventListener("mouseover", function () { highlightMission(slug); });
+        this._path.addEventListener("mouseout", function () {
+          // Debounce clear so moving from path to row doesn't flicker; highlightMission cancels this.
+          if (clearHighlightsTimeout) clearTimeout(clearHighlightsTimeout);
+          clearHighlightsTimeout = setTimeout(function () {
+            clearHighlightsTimeout = null;
+            clearAllMissionHighlights();
+          }, CLEAR_DEBOUNCE_MS);
+        });
       }
     });
   },
 })
   .bindPopup(function (layer) {
+    var p = layer.feature.properties;
+    var slug = (p && p.slug) ? p.slug : "";
+    var expName = (p && p.expedition && p.expedition.name) ? p.expedition.name : "";
+    var routeFile = (p && p.route_file) ? p.route_file : "";
     return (
-      "<a target='_blank' href='" + window.location.origin + '/missions/' +
-      layer.feature.properties.slug +
-      "'>" +
-      layer.feature.properties.slug +
+      "<a target='_blank' rel='noopener noreferrer' href='/missions/" +
+      _escapeHtml(slug) +
+      "/'>" +
+      _escapeHtml(slug) +
       "</a>: " +
-      layer.feature.properties.expedition.name +
+      _escapeHtml(expName) +
       "<br>Route: " +
-      layer.feature.properties.route_file
+      _escapeHtml(routeFile)
     );
   })
   .addTo(map);
 
-// Fit map to mission bounds once the map is ready.
+// Fit map to mission bounds once the map is ready. Use same fallback as home page (map.js):
+// setView(center, 3) when no missions, invalid bounds, or bounds too large — so initial view matches home.
+var MISSION_MAP_FALLBACK_CENTER = [36.6, -122.0];
+var MISSION_MAP_FALLBACK_ZOOM = 6;
 map.whenReady(function () {
   map.invalidateSize();
   setTimeout(function () {
     try {
       if (!hasMissions) {
-        map.setView([39.8423, -26.8945], 3, { animate: false });
+        map.setView(MISSION_MAP_FALLBACK_CENTER, MISSION_MAP_FALLBACK_ZOOM, { animate: false });
         return;
       }
       var featureLayers = feature.getLayers();
       if (!featureLayers || featureLayers.length === 0) {
-        map.setView([39.8423, -26.8945], 3, { animate: false });
+        map.setView(MISSION_MAP_FALLBACK_CENTER, MISSION_MAP_FALLBACK_ZOOM, { animate: false });
         return;
       }
       var bounds;
       try {
         bounds = feature.getBounds();
       } catch (e) {
-        map.setView([39.8423, -26.8945], 3, { animate: false });
+        map.setView(MISSION_MAP_FALLBACK_CENTER, MISSION_MAP_FALLBACK_ZOOM, { animate: false });
         return;
       }
       if (!bounds || !bounds.isValid || !bounds.isValid()) {
-        map.setView([39.8423, -26.8945], 3, { animate: false });
+        map.setView(MISSION_MAP_FALLBACK_CENTER, MISSION_MAP_FALLBACK_ZOOM, { animate: false });
         return;
       }
       var sw = bounds.getSouthWest();
@@ -97,49 +203,104 @@ map.whenReady(function () {
       var latSpan = ne.lat - sw.lat;
       var lngSpan = ne.lng - sw.lng;
       if (
-        lngSpan >= 360 ||
-        latSpan >= 180 ||
         isNaN(latSpan) ||
         isNaN(lngSpan) ||
-        lngSpan > 350 ||
-        latSpan > 170
+        lngSpan >= 360 ||
+        latSpan >= 180
       ) {
-        map.setView([39.8423, -26.8945], 3, { animate: false });
+        map.setView(MISSION_MAP_FALLBACK_CENTER, MISSION_MAP_FALLBACK_ZOOM, { animate: false });
         return;
       }
-      map.fitBounds(bounds, { padding: [100, 100] });
+      var padding = [100, 100];
+      var zoomWouldBe = map.getBoundsZoom(bounds, false, padding);
+      if (zoomWouldBe < 2 || !isFinite(zoomWouldBe)) {
+        map.setView(MISSION_MAP_FALLBACK_CENTER, MISSION_MAP_FALLBACK_ZOOM, { animate: false });
+        return;
+      }
+      map.fitBounds(bounds, { padding: padding, animate: false });
+      map.setZoom(map.getZoom() - 1, { animate: false });
+      if (map.getZoom() < 3) map.setZoom(3, { animate: false });
     } catch (err) {
-      // console.log(err.message);
-      map.setView([39.8423, -26.8945], 3, { animate: false });
+      map.setView(MISSION_MAP_FALLBACK_CENTER, MISSION_MAP_FALLBACK_ZOOM, { animate: false });
     }
   }, 100);
 });
 
-// Mission name labels (markers at start of each track)
+// Mission name labels: one per mission at the northernmost point of each nav-track; offset by pixels so placement looks the same at all zoom levels.
+// Labels are allowed to overlap at zoomed-out views (no collision avoidance) so they stay next to their tracks (issue #293).
 if (hasMissions && missions.features) {
+  var labelPixelOffsetEast = 8;
+  var labelPixelOffsetNorth = 8;
+  var labelMissionEntries = [];
+  /* Flatten to points [lng, lat]: support LineString or MultiLineString. */
+  function flattenCoords(geometry) {
+    var c = geometry.coordinates;
+    if (!c || !c.length) return [];
+    if (typeof c[0][0] === "number") return c;
+    var out = [];
+    for (var k = 0; k < c.length; k++) {
+      for (var m = 0; m < c[k].length; m++) out.push(c[k][m]);
+    }
+    return out;
+  }
+  function updateMissionLabelPositions() {
+    for (var e = 0; e < labelMissionEntries.length; e++) {
+      var entry = labelMissionEntries[e];
+      var pt = map.latLngToContainerPoint(entry.anchor);
+      var newPt = L.point(pt.x + labelPixelOffsetEast, pt.y - labelPixelOffsetNorth);
+      var newLatLng = map.containerPointToLatLng(newPt);
+      entry.marker.setLatLng(newLatLng);
+    }
+  }
   for (var i = 0; i < missions.features.length; i++) {
     var mission = missions.features[i];
-    try {
-      var latlng = L.latLng(
-        mission.geometry.coordinates[0][1],
-        mission.geometry.coordinates[0][0]
-      );
-    } catch (err) {
-      // console.log(mission.properties.slug + ": " + err.message);
-      continue;
+    var coords = flattenCoords(mission.geometry);
+    var slug = (mission.properties && mission.properties.slug) ? mission.properties.slug : "";
+    var maxLat = -Infinity;
+    var lngAtMaxLat = coords[0] ? coords[0][0] : 0;
+    var n = coords.length;
+    for (var j = 0; j < n; j++) {
+      var lng = coords[j][0];
+      var lat = coords[j][1];
+      if (lat > maxLat) {
+        maxLat = lat;
+        lngAtMaxLat = lng;
+      }
     }
-    L.marker(latlng, {
+    if (n === 0) continue;
+    var anchor = L.latLng(maxLat, lngAtMaxLat);
+    var marker = L.marker(anchor, {
       icon: L.divIcon({
         className: "label-mission-name",
         html:
-          "<a target='_blank' href='" + window.location.origin + '/missions/' +
-          mission.properties.slug +
-          "'>" +
-          mission.properties.slug +
+          "<a target='_blank' rel='noopener noreferrer' href='/missions/" +
+          (mission.properties.slug ? _escapeHtml(mission.properties.slug) : "") +
+          "/'>" +
+          (mission.properties.slug ? _escapeHtml(mission.properties.slug) : "") +
           "</a>",
       }),
-    }).addTo(map);
+    });
+    labelMissionEntries.push({ marker: marker, anchor: anchor });
+    (function (missionSlug) {
+      marker.on("add", function () {
+        var el = this._icon;
+        if (!el || !missionSlug) return;
+        el.setAttribute("data-mission-slug", missionSlug);
+        el.setAttribute("data-track-side", "left");
+        el.addEventListener("mouseover", function () { highlightMission(missionSlug); });
+        el.addEventListener("mouseout", function () {
+          if (clearHighlightsTimeout) clearTimeout(clearHighlightsTimeout);
+          clearHighlightsTimeout = setTimeout(function () {
+            clearHighlightsTimeout = null;
+            clearAllMissionHighlights();
+          }, CLEAR_DEBOUNCE_MS);
+        });
+      });
+    })(slug);
+    marker.addTo(map);
   }
+  updateMissionLabelPositions();
+  map.on("zoomend moveend", updateMissionLabelPositions);
 }
 
 // ---------------------------------------------------------------------------
@@ -157,20 +318,28 @@ const FilterControl = L.Control.extend({
     const sidebar = L.DomUtil.create("div", "filter-sidebar", wrapper);
     sidebar.id = "filter-sidebar";
     sidebar.style.cssText =
-      "position:absolute;left:-250px;top:0;width:250px;max-height:250vh;" +
+      "position:absolute;left:-250px;top:0;width:250px;max-height:calc(100vh - 60px);" +
       "height:auto;min-height:50px;background:#2d2d2d;box-shadow:2px 0 12px rgba(0,0,0,0.5);" +
       "border-radius:0 4px 4px 0;color:#e0e0e0;transition:left 0.3s ease,height 0.3s ease;" +
       "overflow:hidden;display:flex;flex-direction:column;z-index:999;pointer-events:auto;";
 
-    // Toggle button.
-    const container = L.DomUtil.create("div", "filter-control", wrapper);
+    // Toggle button (wrapped so custom tooltip can sit next to it, same as Draw Square).
+    const buttonWrapper = L.DomUtil.create("div", "filter-button-wrapper", wrapper);
+    buttonWrapper.style.cssText =
+      "position:absolute;top:5px;left:20px;z-index:1001;width:40px;height:40px;";
+
+    const container = L.DomUtil.create("div", "filter-control", buttonWrapper);
     container.id = "filter-button";
-    container.title = "Filter Missions";
+    container.setAttribute("aria-label", "Filter Missions");
+    const filterTooltip = L.DomUtil.create("span", "map-control-tooltip", buttonWrapper);
+    filterTooltip.textContent = "Filter Missions";
+    filterTooltip.setAttribute("role", "tooltip");
+
     container.style.cssText =
       "width:40px;height:40px;background:hsla(0,0%,100%,0.75);border-radius:4px;" +
       "cursor:pointer;display:flex;flex-direction:column;align-items:center;" +
-      "justify-content:center;box-shadow:0 1px 5px rgba(0,0,0,0.4);position:absolute;" +
-      "top:5px;left:20px;z-index:1001;transition:left 0.3s ease,all 0.2s ease;" +
+      "justify-content:center;box-shadow:0 1px 5px rgba(0,0,0,0.4);position:relative;" +
+      "z-index:1001;transition:left 0.3s ease,all 0.2s ease;" +
       "border:1px solid rgba(0,0,0,0.3);outline:none;margin:0;padding:0;";
 
     const icon = L.DomUtil.create("i", "fas fa-filter", container);
@@ -215,7 +384,8 @@ const FilterControl = L.Control.extend({
 
     // -----------------------------------------------------------------------
     // recalcSidebarHeight — recompute sidebar height after a dropdown opens
-    // or closes (CheckboxSelectMultiple accordion).
+    // or closes. Use natural height (auto) so collapsed content is measured
+    // correctly; body has flex:1 so scrollHeight can stay large after collapse.
     // -----------------------------------------------------------------------
     function recalcSidebarHeight() {
       if (!sidebar) return;
@@ -223,124 +393,20 @@ const FilterControl = L.Control.extend({
       var mapH  = mapEl ? mapEl.clientHeight : Math.round(window.innerHeight * 0.5);
       var b = document.getElementById("filter-sidebar-body");
       if (!b) return;
-      var hdrH = sidebar.querySelector(".filter-sidebar-header")
-        ? sidebar.querySelector(".filter-sidebar-header").offsetHeight
-        : 50;
-      var pad =
-        parseFloat(window.getComputedStyle(b).paddingTop) +
-        parseFloat(window.getComputedStyle(b).paddingBottom);
-      sidebar.style.height =
-        Math.min(b.scrollHeight + hdrH + pad, mapH) + "px";
-    }
-
-    // -----------------------------------------------------------------------
-    // setupCheckboxDropdowns — turn each CheckboxSelectMultiple group into a
-    // collapsible accordion.
-    //
-    // crispy-forms + Bootstrap 5 renders CheckboxSelectMultiple as:
-    //   <div id="div_id_FIELD[-sidebar]" class="mb-3">   ← field wrapper
-    //     <fieldset>
-    //       <legend class="form-label">LABEL</legend>    ← toggle target
-    //       <div>                                        ← checkbox panel
-    //         <div class="form-check">
-    //           <input type="checkbox" ...>
-    //           <label class="form-check-label">...</label>
-    //         </div>
-    //         ...
-    //       </div>
-    //     </fieldset>
-    //   </div>
-    // -----------------------------------------------------------------------
-    function setupCheckboxDropdowns(formEl) {
-      formEl.querySelectorAll('[id^="div_id_"]').forEach(function (outerDiv) {
-        var checks = outerDiv.querySelectorAll(".form-check");
-        if (checks.length === 0) return;  // not a checkbox group
-
-        // The legend (or label) is the field-level heading element.
-        var toggleEl = outerDiv.querySelector("legend") ||
-                       outerDiv.querySelector("label.form-label");
-        if (!toggleEl) return;
-
-        // The checkbox panel is the direct parent of the .form-check items.
-        var panel = checks[0].parentElement;
-        if (!panel) return;
-
-        // Style the legend as a clickable dropdown toggle — identical to the
-        // <select> elements in the sidebar (background #1e1e1e, white text).
-        var TOGGLE_BG     = "#1e1e1e";
-        var TOGGLE_BORDER = "#555";
-
-        toggleEl.style.cssText =
-          "display:flex;justify-content:space-between;align-items:center;" +
-          "width:100%;max-width:230px;padding:0.3rem;box-sizing:border-box;" +
-          "background:" + TOGGLE_BG + ";border:1px solid " + TOGGLE_BORDER + ";" +
-          "border-radius:4px;cursor:pointer;color:#e0e0e0;font-size:0.8rem;" +
-          "margin-bottom:0;user-select:none;display:flex;" +
-          "justify-content:space-between;align-items:center;";
-
-        // Use the same Bootstrap 5 chevron SVG that <select> uses, white-tinted.
-        var caret = document.createElement("span");
-        caret.innerHTML = "&#8964;";   // ⌄ downward chevron
-        caret.style.cssText =
-          "font-size:0.9rem;font-weight:bold;line-height:1;" +
-          "transition:transform 0.2s;flex-shrink:0;color:#e0e0e0;";
-        toggleEl.appendChild(caret);
-
-        // Hover: match project.css .form-control:hover exactly —
-        //   box-shadow: inset 0 1px 1px rgba(0,0,0,0.075), 0 0 8px cornflowerblue
-        // The sidebar <select> elements get this via the CSS rule; we apply it
-        // inline here so the legend toggle is pixel-identical.
-        toggleEl.addEventListener("mouseenter", function () {
-          toggleEl.style.boxShadow =
-            "inset 0 1px 1px rgba(0,0,0,0.075), 0 0 8px cornflowerblue";
-        });
-        toggleEl.addEventListener("mouseleave", function () {
-          toggleEl.style.boxShadow = "none";
-        });
-
-        // Remove <fieldset> browser-default border and padding so the toggle
-        // and panel sit flush with each other.
-        var fieldset = outerDiv.querySelector("fieldset");
-        if (fieldset) {
-          fieldset.style.cssText = "border:none;padding:0;margin:0;min-width:0;";
-        }
-
-        // Style the checkbox panel.
-        panel.style.cssText =
-          "padding:0.15rem 0 0.15rem 10px;margin:0;" +
-          "background:#2a2a2a;border:1px solid #555;border-top:none;" +
-          "border-radius:0 0 4px 4px;";
-        panel.querySelectorAll(".form-check").forEach(function (chk) {
-          // Only override vertical spacing — Bootstrap 5 needs padding-left:1.5em
-          // to position the floated checkbox input correctly; touching it moves
-          // the checkboxes hard-left outside their labels.
-          chk.style.marginBottom = "0";
-          chk.style.paddingTop = "0.15rem";
-          chk.style.paddingBottom = "0.15rem";
-          chk.style.minHeight = "unset";
-        });
-        panel.querySelectorAll(".form-check-label").forEach(function (lbl) {
-          lbl.style.color = "#e0e0e0";
-          lbl.style.fontSize = "0.8rem";
-          lbl.style.cursor = "pointer";
-          lbl.style.margin = "0";
-        });
-
-        // Start collapsed; auto-open if any item is already checked.
-        var hasChecked = !!panel.querySelector("input[type='checkbox']:checked");
-        panel.style.display = hasChecked ? "block" : "none";
-        if (hasChecked) caret.style.transform = "rotate(180deg)";
-
-        // Toggle open/close on legend click.
-        toggleEl.addEventListener("click", function (e) {
-          e.preventDefault();
-          var open = panel.style.display !== "none";
-          panel.style.display = open ? "none" : "block";
-          caret.style.transform = open ? "" : "rotate(180deg)";
-          setTimeout(recalcSidebarHeight, 50);
+      var bodyFlex = b.style.flex;
+      b.style.flex = "0 0 auto";
+      sidebar.style.height = "auto";
+      // Let layout settle, then read natural height and restore fixed height + flex
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+          var natural = sidebar.offsetHeight;
+          sidebar.style.height = Math.min(natural, mapH) + "px";
+          b.style.flex = bodyFlex || "1";
         });
       });
     }
+
+    // setupCheckboxDropdowns is in project.js (shared with map.js).
 
     const copyForm = function () {
       const formContainer = document.getElementById("filter-form-container");
@@ -407,6 +473,7 @@ const FilterControl = L.Control.extend({
       filterBtn.className = "btn btn-primary";
       filterBtn.textContent = "Filter";
       _styleBtn(filterBtn, "#007bff");
+      addBtnHoverFeedback(filterBtn, "#0069d9", "#0062cc", "#0062cc");
 
       const clearBtn = document.createElement("button");
       clearBtn.type = "reset";
@@ -414,6 +481,7 @@ const FilterControl = L.Control.extend({
       clearBtn.className = "btn btn-secondary";
       clearBtn.textContent = "Clear";
       _styleBtn(clearBtn, "#6c757d");
+      addBtnHoverFeedback(clearBtn, "#5a6268", "#545b62", "#545b62");
 
       buttonRow.appendChild(filterBtn);
       buttonRow.appendChild(clearBtn);
@@ -429,6 +497,8 @@ const FilterControl = L.Control.extend({
       }, 100);
 
       // Clear button: stay on Missions page, strip filter params.
+      // Listener is on the sidebar body element (body), not document.body, so it
+      // is scoped to the sidebar and is removed when the sidebar is removed from the DOM.
       // Only attach once — copyForm() may be retried and would otherwise
       // register duplicate handlers on each attempt.
       if (!clearListenerAdded) {
@@ -445,16 +515,26 @@ const FilterControl = L.Control.extend({
             e.preventDefault();
             e.stopPropagation();
             e.stopImmediatePropagation();
-            sessionStorage.setItem("sidebarOpen", "true");
+            if (tgt.dataset.clearing === "true") { return false; }
+            tgt.dataset.clearing = "true";
+            tgt.textContent = "Clearing\u2026";
+            tgt.style.setProperty("background-color", "#545b62", "important");
+            tgt.style.setProperty("border-color", "#545b62", "important");
+            tgt.disabled = true;
+            tgt.setAttribute("aria-disabled", "true");
             var url = new URL(window.location.href);
             [
               "name", "region_name", "vehicle_name", "platformtype",
               "quality_categories", "patch_test",
-              "repeat_survey", "mgds_compilation", "citation", "expedition__name",
+              "repeat_survey", "mgds_compilation", "citation", "citation_search", "expedition__name",
               "filter_type", "q", "xmin", "xmax", "ymin", "ymax",
               "tmin", "tmax",
             ].forEach(function (k) { url.searchParams.delete(k); });
-            window.location.href = url.toString();
+            var clearUrl = url.toString();
+            sessionStorage.setItem("sidebarOpen", "true");
+            setTimeout(function () {
+              window.location.href = clearUrl;
+            }, 80);
             return false;
           }
         },
@@ -465,19 +545,33 @@ const FilterControl = L.Control.extend({
       // Form submit: reload Missions page with filter params in URL.
       clonedForm.addEventListener("submit", function (e) {
         e.preventDefault();
+        if (clonedForm.dataset.submitting === "true") { return false; }
+        clonedForm.dataset.submitting = "true";
+        var submitBtn = clonedForm.querySelector('[id$="FilterSubmit"]') ||
+                        clonedForm.querySelector('[type="submit"]');
+        if (submitBtn) {
+          submitBtn.textContent = "Filtering\u2026";
+          submitBtn.style.setProperty("background-color", "#0062cc", "important");
+          submitBtn.style.setProperty("border-color", "#0062cc", "important");
+          submitBtn.disabled = true;
+          submitBtn.setAttribute("aria-disabled", "true");
+        }
         var params = new URLSearchParams(new FormData(clonedForm));
         var url = new URL(window.location.href);
         [
           "name", "region_name", "vehicle_name", "platformtype",
           "quality_categories", "patch_test",
-          "repeat_survey", "mgds_compilation", "citation", "expedition__name",
+          "repeat_survey", "mgds_compilation", "citation", "citation_search", "expedition__name",
           "filter_type",
         ].forEach(function (k) { url.searchParams.delete(k); });
         // Use append (not set) to preserve all checkbox values for multi-select fields.
         params.forEach(function (val, key) {
           if (val) url.searchParams.append(key, val);
         });
-        window.location.href = url.toString();
+        var filterUrl = url.toString();
+        setTimeout(function () {
+          window.location.href = filterUrl;
+        }, 80);
       });
 
       // Style form inputs for the dark sidebar theme.
@@ -546,7 +640,7 @@ const FilterControl = L.Control.extend({
       }
 
       // Convert CheckboxSelectMultiple groups into collapsible accordions.
-      setupCheckboxDropdowns(clonedForm);
+      setupCheckboxDropdowns(clonedForm, recalcSidebarHeight);
 
       // Auto-adjust sidebar height.
       setTimeout(function () {
@@ -595,7 +689,7 @@ const FilterControl = L.Control.extend({
 
     function showSidebar() {
       sidebar.style.left = "0px";
-      container.style.left = "250px";
+      buttonWrapper.style.left = "250px";
       var b = document.getElementById("filter-sidebar-body");
       if (b) {
         var formEl = b.querySelector("form");
@@ -622,7 +716,7 @@ const FilterControl = L.Control.extend({
 
     function hideSidebar() {
       sidebar.style.left = "-250px";
-      container.style.left = "20px";
+      buttonWrapper.style.left = "20px";
     }
 
     // Re-open sidebar after Clear button reloads the page.
@@ -705,7 +799,11 @@ var DrawSquareButton = L.Control.extend({
 
     var btn = L.DomUtil.create("div", "draw-square-control", wrapper);
     btn.id = "drawSquare-button";
-    btn.title = "Draw a rectangle to search for missions in that area.";
+    btn.setAttribute("aria-label", "Draw a square around missions to create an exportable list.");
+    // Custom tooltip (same class as Filter button so both use identical styling)
+    var tooltipEl = L.DomUtil.create("span", "map-control-tooltip", wrapper);
+    tooltipEl.textContent = "Draw a square around missions to create an exportable list";
+    tooltipEl.setAttribute("role", "tooltip");
     btn.style.cssText =
       "width:40px;height:40px;background:hsla(0,0%,100%,0.75);border-radius:4px;" +
       "cursor:pointer;display:flex;flex-direction:column;align-items:center;" +
@@ -765,12 +863,13 @@ function styleDrawSquareControl() {
   }
 }
 setTimeout(styleDrawSquareControl, 100);
-setTimeout(styleDrawSquareControl, 500);
 
 // Store drawn-rectangle bounds globally for use by exportMissions().
 window.drawnRectangleBounds = null;
 
-// When user finishes drawing a rectangle: show the results panel.
+// When user finishes drawing a rectangle: show the results panel and fetch missions
+// via API. The panel is updated in place; the main django-tables2 table below the map
+// is not updated until a full page reload with bbox in the URL (e.g. Submit filter).
 map.on(L.Draw.Event.CREATED, function (e) {
   if (e.layerType !== "rectangle") return;
   drawnItems.clearLayers();
@@ -785,16 +884,17 @@ map.on(L.Draw.Event.CREATED, function (e) {
   };
   window.drawnRectangleBounds = bbox;
 
-  // Collect any active filter params from the current URL.
   var urlParams = new URLSearchParams(window.location.search);
   var filterParams = {};
   [
     "name", "region_name", "vehicle_name", "platformtype",
     "quality_categories", "patch_test",
-    "repeat_survey", "mgds_compilation", "citation", "expedition__name",
+    "repeat_survey", "mgds_compilation", "citation", "citation_search", "expedition__name",
     "filter_type", "q", "tmin", "tmax",
   ].forEach(function (k) {
-    if (urlParams.has(k)) filterParams[k] = urlParams.get(k);
+    if (!urlParams.has(k)) return;
+    var vals = urlParams.getAll(k);
+    filterParams[k] = vals.length > 1 ? vals : vals[0];
   });
   filterParams.xmin = bbox.xmin;
   filterParams.xmax = bbox.xmax;
@@ -865,18 +965,28 @@ function showResultsPanel(loading) {
         if (e.target.classList.contains("btn-close")) return;
         isDragging = true;
         var rect = panel.getBoundingClientRect();
-        dragOffX = e.clientX - rect.left;
-        dragOffY = e.clientY - rect.top;
+        var pixLeft = rect.left;
+        var pixTop  = rect.top;
+        dragOffX = e.clientX - pixLeft;
+        dragOffY = e.clientY - pixTop;
+        // Remove transform and lock in pixel position in one batch so the
+        // panel does not jump when CSS centers it with translate(-50%,-50%).
         panel.style.transform = "none";
+        panel.style.left = pixLeft + "px";
+        panel.style.top  = pixTop  + "px";
         e.preventDefault();
       });
     }
-    document.addEventListener("mousemove", function (e) {
+    function onPanelDragMove(e) {
       if (!isDragging) return;
       panel.style.left = e.clientX - dragOffX + "px";
       panel.style.top  = e.clientY - dragOffY + "px";
-    });
-    document.addEventListener("mouseup", function () { isDragging = false; });
+    }
+    function onPanelDragUp() { isDragging = false; }
+    document.addEventListener("mousemove", onPanelDragMove);
+    document.addEventListener("mouseup", onPanelDragUp);
+    panel._dragMove = onPanelDragMove;
+    panel._dragUp   = onPanelDragUp;
 
     // Resize handles.
     _attachResizeHandles(panel);
@@ -893,7 +1003,14 @@ function showResultsPanel(loading) {
 
 function hideResultsPanel() {
   var panel = document.getElementById("selection-results-panel");
-  if (panel) panel.style.display = "none";
+  if (panel) {
+    panel.style.display = "none";
+    // Do NOT remove the drag mousemove/mouseup listeners here.  They live on
+    // the panel's closure and are only activated when isDragging is true, so
+    // they are harmless while the panel is hidden.  Removing them broke drag
+    // on every re-open because showResultsPanel only attaches them once (inside
+    // the if (!panel) creation block which is skipped on subsequent calls).
+  }
   drawnItems.clearLayers();
   window.drawnRectangleBounds = null;
 }
@@ -931,10 +1048,11 @@ function updateResultsPanel(message, missions) {
     "</tr></thead><tbody>";
 
   missions.forEach(function (m) {
+    var missionSlug = m.slug ? String(m.slug) : "";
     html +=
-      "<tr>" +
-      '<td><a href="' + window.location.origin + '/missions/' +
-      (m.slug ? encodeURIComponent(m.slug) : "") +
+      "<tr" + (missionSlug ? ' data-mission-slug="' + _escapeHtml(missionSlug) + '"' : "") + ">" +
+      '<td><a href="/missions/' +
+      (m.slug ? _escapeHtml(m.slug) : "") +
       '/">' +
       _escapeHtml(m.name) +
       "</a></td>" +
@@ -949,16 +1067,37 @@ function updateResultsPanel(message, missions) {
 
   html += "</tbody></table></div>";
   content.innerHTML = html;
+
+  // Bidirectional hover: row hover highlights track (issue #293).
+  content.querySelectorAll("tr[data-mission-slug]").forEach(function (tr) {
+    var slug = tr.getAttribute("data-mission-slug");
+    if (!slug) return;
+    tr.addEventListener("mouseover", function () { highlightMission(slug); });
+    tr.addEventListener("mouseout", function () {
+      if (clearHighlightsTimeout) clearTimeout(clearHighlightsTimeout);
+      clearHighlightsTimeout = setTimeout(function () {
+        clearHighlightsTimeout = null;
+        clearAllMissionHighlights();
+      }, CLEAR_DEBOUNCE_MS);
+    });
+  });
+
   window.selectedMissions = missions;
 }
 
 function fetchFilteredMissions(filterParams) {
-  var qs = Object.keys(filterParams)
-    .map(function (k) {
-      var v = filterParams[k];
-      return encodeURIComponent(k) + "=" + encodeURIComponent(v != null ? String(v) : "");
-    })
-    .join("&");
+  var parts = [];
+  Object.keys(filterParams).forEach(function (k) {
+    var v = filterParams[k];
+    if (Array.isArray(v)) {
+      v.forEach(function (val) {
+        parts.push(encodeURIComponent(k) + "=" + encodeURIComponent(val != null ? String(val) : ""));
+      });
+    } else {
+      parts.push(encodeURIComponent(k) + "=" + encodeURIComponent(v != null ? String(v) : ""));
+    }
+  });
+  var qs = parts.join("&");
 
   fetch("/api/v1/missions/select?" + qs)
     .then(function (resp) {
@@ -1004,10 +1143,12 @@ function exportMissions(format) {
   [
     "name", "region_name", "vehicle_name", "platformtype",
     "quality_categories", "patch_test",
-    "repeat_survey", "mgds_compilation", "citation", "expedition__name",
+    "repeat_survey", "mgds_compilation", "citation", "citation_search", "expedition__name",
     "filter_type", "q", "tmin", "tmax",
   ].forEach(function (k) {
-    if (urlParams.has(k)) filterParams[k] = urlParams.get(k);
+    if (!urlParams.has(k)) return;
+    var vals = urlParams.getAll(k);
+    filterParams[k] = vals.length > 1 ? vals : vals[0];
   });
   filterParams.xmin = bbox.xmin;
   filterParams.xmax = bbox.xmax;
@@ -1015,14 +1156,18 @@ function exportMissions(format) {
   filterParams.ymax = bbox.ymax;
   filterParams.format = format;
 
-  var qs = Object.keys(filterParams)
-    .map(function (k) {
-      var v = filterParams[k];
-      var vStr = v != null ? String(v) : "";
-      return encodeURIComponent(k) + "=" + encodeURIComponent(vStr);
-    })
-    .join("&");
-
+  var parts = [];
+  Object.keys(filterParams).forEach(function (k) {
+    var v = filterParams[k];
+    if (Array.isArray(v)) {
+      v.forEach(function (val) {
+        parts.push(encodeURIComponent(k) + "=" + encodeURIComponent(val != null ? String(val) : ""));
+      });
+    } else {
+      parts.push(encodeURIComponent(k) + "=" + encodeURIComponent(v != null ? String(v) : ""));
+    }
+  });
+  var qs = parts.join("&");
   window.location.href = "/api/v1/missions/export?" + qs;
 }
 
@@ -1050,7 +1195,9 @@ function _styleBtn(btn, borderColor) {
   btn.style.setProperty("box-sizing", "border-box", "important");
   btn.style.setProperty("flex", "1 1 auto", "important");
   btn.style.setProperty("align-self", "center", "important");
+  btn.style.setProperty("transition", "background-color 0.15s ease-in-out, border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out, transform 0.12s ease-in-out", "important");
 }
+
 
 // ---------------------------------------------------------------------------
 // initTableLayout — pins #mission-table-wrapper to the viewport as a fixed
@@ -1061,7 +1208,7 @@ function _styleBtn(btn, borderColor) {
 // viewport-relative coordinates returned by getBoundingClientRect().
 //
 // Side-effects:
-//   • The footer is also fixed to the viewport bottom so it stays visible.
+//   • Footer is fixed by CSS (body.missions-page #footer) so it stays visible; we only read its height.
 //   • The table body is the only thing that scrolls (overflow-y:auto).
 // ---------------------------------------------------------------------------
 function initTableLayout() {
@@ -1069,18 +1216,9 @@ function initTableLayout() {
   var tableWrapper = document.getElementById("mission-table-wrapper");
   if (!tableWrapper || !mapEl) return;
 
-  // 1. Pin the footer to the viewport bottom so it sits above the table.
+  // 1. Footer is fixed by CSS (body.missions-page #footer in map_mission_filter.css).
   var footerEl = document.getElementById("footer");
-  var footerH  = 0;
-  if (footerEl) {
-    footerH = footerEl.offsetHeight;
-    footerEl.style.position        = "fixed";
-    footerEl.style.bottom          = "0";
-    footerEl.style.left            = "0";
-    footerEl.style.right           = "0";
-    footerEl.style.zIndex          = "2";
-    footerEl.style.backgroundColor = "#fff";
-  }
+  var footerH  = footerEl ? footerEl.offsetHeight : 0;
 
   // 2. Fix the table wrapper between the map's visual bottom and the footer.
   //    getBoundingClientRect().bottom already accounts for the CSS top:150px
@@ -1108,6 +1246,21 @@ window.addEventListener("resize", function () {
   setTimeout(initTableLayout, 50);
 });
 
+// Re-run layout when the map element's size changes (e.g. tiles loading, CSS
+// settling) so the table wrapper stays under the map's visual bottom.
+var mapElForObserver = document.getElementById("map_mission_filter");
+if (mapElForObserver && typeof ResizeObserver !== "undefined") {
+  var layoutTimeout = null;
+  var resizeObserver = new ResizeObserver(function () {
+    if (layoutTimeout) clearTimeout(layoutTimeout);
+    layoutTimeout = setTimeout(function () {
+      layoutTimeout = null;
+      initTableLayout();
+    }, 50);
+  });
+  resizeObserver.observe(mapElForObserver);
+}
+
 function _attachResizeHandles(panel) {
   var handles = panel.querySelectorAll(".resize-handle");
   handles.forEach(function (handle) {
@@ -1128,6 +1281,11 @@ function _attachResizeHandles(panel) {
       var isSE = handle.classList.contains("resize-handle-se");
       var isSW = handle.classList.contains("resize-handle-sw");
 
+      // Lock pixel position before removing transform so the panel doesn't jump
+      // (East/South/SE handles never set left/top in onMove, so without this the
+      // panel snaps to left:50%;top:50% without the centering translate).
+      panel.style.left = startL + "px";
+      panel.style.top  = startT + "px";
       panel.style.transform = "none";
 
       function onMove(ev) {
@@ -1145,4 +1303,28 @@ function _attachResizeHandles(panel) {
       document.addEventListener("mouseup", onUp);
     });
   });
+}
+
+// Attach bidirectional hover to main mission table rows (django_tables2) — issue #293.
+function attachMissionTableRowHover() {
+  var mapEl = document.getElementById("map_mission_filter");
+  if (!mapEl) return;
+  document.querySelectorAll("tr[data-mission-slug]").forEach(function (tr) {
+    if (tr.closest("#selection-results-content")) return;
+    var slug = tr.getAttribute("data-mission-slug");
+    if (!slug) return;
+    tr.addEventListener("mouseover", function () { highlightMission(slug); });
+    tr.addEventListener("mouseout", function () {
+      if (clearHighlightsTimeout) clearTimeout(clearHighlightsTimeout);
+      clearHighlightsTimeout = setTimeout(function () {
+        clearHighlightsTimeout = null;
+        clearAllMissionHighlights();
+      }, CLEAR_DEBOUNCE_MS);
+    });
+  });
+}
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", attachMissionTableRowHover);
+} else {
+  attachMissionTableRowHover();
 }

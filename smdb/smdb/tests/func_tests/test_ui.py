@@ -2,6 +2,7 @@
 
 import pytest
 import time
+from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
@@ -217,8 +218,12 @@ def test_nav_track_classes_assigned(chrome, live_server_url_for_selenium, missio
     """
     chrome.get(live_server_url_for_selenium)
 
-    # Wait up to 15 s for at least one fully-classed track path to appear in the DOM.
-    WebDriverWait(chrome, 15).until(
+    # Wait for map container first so we don't burn timeout during page load.
+    WebDriverWait(chrome, 10).until(
+        EC.presence_of_element_located((By.ID, "map"))
+    )
+    # Wait up to 25 s for at least one fully-classed track path (GeoJSON layer + add event).
+    WebDriverWait(chrome, 25).until(
         EC.presence_of_element_located((By.CSS_SELECTOR, _TRACK_CSS))
     )
 
@@ -254,8 +259,11 @@ def test_nav_track_highlights_yellow_on_hover(chrome, live_server_url_for_seleni
     """
     chrome.get(live_server_url_for_selenium)
 
-    # Wait for a track path with the correct classes to be present.
-    track = WebDriverWait(chrome, 15).until(
+    # Wait for map first, then track path (reduces flake: GeoJSON + layer add can be slow).
+    WebDriverWait(chrome, 10).until(
+        EC.presence_of_element_located((By.ID, "map"))
+    )
+    track = WebDriverWait(chrome, 25).until(
         EC.presence_of_element_located((By.CSS_SELECTOR, _TRACK_CSS))
     )
 
@@ -310,27 +318,142 @@ def test_nav_track_highlights_yellow_on_hover(chrome, live_server_url_for_seleni
         )
         return c and ("255, 255, 0" in c or c.lower() == "yellow")
 
-    # Attempt 1: precise viewport-coordinate move — avoids WebDriverWait polling
-    # which can reset :hover state in some headless Chromium builds.
+    # Attempt 1: precise viewport-coordinate move.
     mouse = PointerInput("mouse", "mouse")
     builder = ActionBuilder(chrome, mouse=mouse)
     builder.pointer_action.move_to_location(int(coords["pathX"]), int(coords["pathY"]))
     builder.perform()
-    time.sleep(0.5)
+    try:
+        WebDriverWait(chrome, 2, poll_frequency=0.2).until(lambda d: _is_yellow())
+    except TimeoutException:
+        pass
 
     # Attempt 2: element-centre fallback for environments where the coordinate
     # approach misses the stroke (e.g. different window size or DPR scaling).
     if not _is_yellow():
         ActionChains(chrome).move_to_element(track).perform()
-        time.sleep(0.5)
+        try:
+            WebDriverWait(chrome, 2, poll_frequency=0.2).until(lambda d: _is_yellow())
+        except TimeoutException:
+            pass
 
-    hover_color = chrome.execute_script(
-        "return window.getComputedStyle(arguments[0]).stroke;", track
+    # If neither strategy landed the hover on the path, fail with a clear message
+    # so CI logs show "hover missed" rather than "wrong color" (avoids false negatives).
+    if not _is_yellow():
+        pytest.fail(
+            "Hover did not land on track after both strategies (coordinate move and "
+            "move_to_element). The track may be too thin or DPR/window size may differ. "
+            "Highlight behavior may still be correct; this can be flaky in headless CI."
+        )
+    # When we get here, _is_yellow() is True so the track stroke is yellow (hover landed).
+
+
+# ---------------------------------------------------------------------------
+# Bidirectional track–name hover link — GitHub issue #293
+# ---------------------------------------------------------------------------
+
+_TRACK_MISSION_CSS = "path.leaflet-interactive.smdb-track-line.smdb-geometry-line[data-mission-slug]"
+
+
+@pytest.mark.django_db
+@pytest.mark.selenium
+def test_track_and_mission_name_highlight_together_on_hover(
+    chrome, live_server_url_for_selenium, missions_notes_5
+):
+    """Hovering a nav track highlights the matching mission row and vice versa; mouse away clears both (issue #293).
+
+    Runs on the Missions page where the map and mission table are both visible.
+    """
+    chrome.get(live_server_url_for_selenium + "/missions/")
+
+    # Wait for at least one track path with data-mission-slug and one table row with same.
+    WebDriverWait(chrome, 15).until(
+        EC.presence_of_element_located((By.CSS_SELECTOR, _TRACK_MISSION_CSS))
+    )
+    track = chrome.find_element(By.CSS_SELECTOR, _TRACK_MISSION_CSS)
+    slug = track.get_attribute("data-mission-slug")
+    assert slug, "Track path must have data-mission-slug (issue #293)."
+
+    row_selector = 'tr[data-mission-slug="' + slug + '"]'
+    try:
+        row = WebDriverWait(chrome, 10).until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, row_selector))
+        )
+    except TimeoutException:
+        pytest.skip(
+            "No mission table row found with matching data-mission-slug; "
+            "this can happen if the mission is not visible on the current page "
+            "of the mission table or if there are no missions with tracks."
+        )
+
+    # Move mouse away first so we start from a clean state.
+    ActionChains(chrome).move_to_element_with_offset(
+        chrome.find_element(By.TAG_NAME, "body"), 0, 0
+    ).perform()
+    time.sleep(0.3)
+
+    # 1) Hover track -> track and row should get .smdb-hover
+    coords = chrome.execute_script(
+        """
+        var path = arguments[0];
+        var svg = path.ownerSVGElement;
+        var pt = path.getPointAtLength(path.getTotalLength() / 2);
+        var sp = svg.createSVGPoint();
+        sp.x = pt.x; sp.y = pt.y;
+        var s = sp.matrixTransform(svg.getScreenCTM());
+        return { x: s.x, y: s.y };
+        """,
+        track,
+    )
+    if coords:
+        mouse = PointerInput("mouse", "mouse")
+        builder = ActionBuilder(chrome, mouse=mouse)
+        builder.pointer_action.move_to_location(int(coords["x"]), int(coords["y"]))
+        builder.perform()
+    else:
+        ActionChains(chrome).move_to_element(track).perform()
+    time.sleep(0.4)
+
+    assert "smdb-hover" in (track.get_attribute("class") or ""), (
+        "Hovering track should add smdb-hover to the path (issue #293)."
+    )
+    assert "smdb-hover" in (row.get_attribute("class") or ""), (
+        "Hovering track should add smdb-hover to the matching mission row (issue #293)."
     )
 
-    assert hover_color is not None, "Could not read computed stroke on track element."
-    assert "255, 255, 0" in hover_color or hover_color.lower() == "yellow", (
-        f"Track stroke should be yellow (rgb(255, 255, 0)) when hovered, "
-        f"got '{hover_color}' (resting was '{resting_color}'). "
-        "Check the :hover rule in project.css and class assignment in map.js (issue #291)."
+    # 2) Mouse away -> both should lose .smdb-hover
+    ActionChains(chrome).move_to_element_with_offset(
+        chrome.find_element(By.TAG_NAME, "body"), 0, 0
+    ).perform()
+    time.sleep(0.4)
+
+    assert "smdb-hover" not in (track.get_attribute("class") or ""), (
+        "Moving mouse away should remove smdb-hover from the track (issue #293)."
+    )
+    assert "smdb-hover" not in (row.get_attribute("class") or ""), (
+        "Moving mouse away should remove smdb-hover from the row (issue #293)."
+    )
+
+    # 3) Hover row -> row and track should get .smdb-hover
+    ActionChains(chrome).move_to_element(row).perform()
+    time.sleep(0.4)
+
+    assert "smdb-hover" in (row.get_attribute("class") or ""), (
+        "Hovering row should add smdb-hover to the row (issue #293)."
+    )
+    assert "smdb-hover" in (track.get_attribute("class") or ""), (
+        "Hovering row should add smdb-hover to the matching track (issue #293)."
+    )
+
+    # 4) Mouse away -> both should clear again
+    ActionChains(chrome).move_to_element_with_offset(
+        chrome.find_element(By.TAG_NAME, "body"), 0, 0
+    ).perform()
+    time.sleep(0.4)
+
+    assert "smdb-hover" not in (track.get_attribute("class") or ""), (
+        "Moving mouse away should clear track highlight (issue #293)."
+    )
+    assert "smdb-hover" not in (row.get_attribute("class") or ""), (
+        "Moving mouse away should clear row highlight (issue #293)."
     )

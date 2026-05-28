@@ -20,6 +20,28 @@ const options = {
   groupCheckboxes: true,
 };
 
+// Debounced highlight helpers (mirrors map_mission_filter.js pattern).
+var mapClearHighlightsTimeout = null;
+var MAP_CLEAR_DEBOUNCE_MS = 80;
+
+function mapClearAllMissionHighlights() {
+  document.querySelectorAll('.smdb-hover').forEach(function(el) {
+    el.classList.remove('smdb-hover');
+  });
+}
+
+function mapHighlightMission(slug) {
+  if (mapClearHighlightsTimeout) {
+    clearTimeout(mapClearHighlightsTimeout);
+    mapClearHighlightsTimeout = null;
+  }
+  mapClearAllMissionHighlights();
+  if (!slug) return;
+  document.querySelectorAll('[data-mission-slug="' + slug.replace(/\\/g, "\\\\").replace(/"/g, '\\"') + '"]').forEach(function(el) {
+    el.classList.add('smdb-hover');
+  });
+}
+
 const map = L.map("map", {
   ...options,
   zoomSnap: 0.5,  // Allow fractional zoom levels (0.5 increments: 1, 1.5, 2, 2.5, 3, etc.)
@@ -129,11 +151,22 @@ const FilterControl = L.Control.extend({
     sidebar.style.pointerEvents = "auto";
     sidebar.style.minHeight = "50px"; // At least button height
 
-    // Filter button - initially standalone, moves to right edge of sidebar when sidebar opens
-    // Don't use leaflet-bar/leaflet-control classes to avoid default Leaflet styling that creates borders
-    const container = L.DomUtil.create("div", "filter-control", wrapper);
+    // Filter button - wrapped so custom tooltip matches Mission page (same class/styling)
+    const buttonWrapper = L.DomUtil.create("div", "filter-button-wrapper", wrapper);
+    buttonWrapper.style.position = "absolute";
+    buttonWrapper.style.top = "5px";
+    buttonWrapper.style.left = "20px";
+    buttonWrapper.style.zIndex = "1001";
+    buttonWrapper.style.width = "40px";
+    buttonWrapper.style.height = "40px";
+
+    const container = L.DomUtil.create("div", "filter-control", buttonWrapper);
     container.id = "filter-button";
-    container.title = "Filter Map View"; // Tooltip on hover
+    container.setAttribute("aria-label", "Filter Map View");
+    const filterTooltip = L.DomUtil.create("span", "map-control-tooltip", buttonWrapper);
+    filterTooltip.textContent = "Filter Map View";
+    filterTooltip.setAttribute("role", "tooltip");
+
     container.style.width = "40px";
     container.style.height = "40px";
     container.style.backgroundColor = "hsla(0, 0%, 100%, 0.75)"; // Semi-transparent white like other controls
@@ -144,9 +177,7 @@ const FilterControl = L.Control.extend({
     container.style.alignItems = "center";
     container.style.justifyContent = "center";
     container.style.boxShadow = "0 1px 5px rgba(0,0,0,0.4)";
-    container.style.position = "absolute";
-    container.style.top = "5px";
-    container.style.left = "20px"; // 20px from left edge of map when closed
+    container.style.position = "relative";
     container.style.zIndex = "1001"; // Above sidebar
     container.style.transition = "left 0.3s ease, all 0.2s ease"; // Smooth transitions for all properties
     container.style.border = "1px solid rgba(0, 0, 0, 0.3)"; // More obvious border
@@ -232,100 +263,78 @@ const FilterControl = L.Control.extend({
     body.style.minHeight = "200px";
     body.style.maxHeight = "calc(80vh - 60px)"; // Account for header height
 
+    // Inject CSS once for sidebar button hover/active states.
+    // CSS :hover is more reliable than JS mouseenter listeners because it
+    // cannot be blocked by inline-style re-application or event timing.
+    if (!document.getElementById('smdb-sidebar-btn-css')) {
+      var sidebarBtnStyle = document.createElement('style');
+      sidebarBtnStyle.id = 'smdb-sidebar-btn-css';
+      sidebarBtnStyle.textContent =
+        '#filter-sidebar-body .btn-primary,' +
+        '#filter-sidebar-body .btn-secondary {' +
+        '  cursor: pointer;' +
+        '}' +
+        '#filter-sidebar-body .btn-primary:disabled,' +
+        '#filter-sidebar-body .btn-secondary:disabled,' +
+        '#filter-sidebar-body .btn[aria-disabled="true"] {' +
+        '  cursor: default;' +
+        '}' +
+        '#filter-sidebar-body .btn-primary {' +
+        '  transition: background-color 0.15s ease-in-out, border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out, transform 0.12s ease-in-out !important;' +
+        '}' +
+        '#filter-sidebar-body .btn-secondary {' +
+        '  transition: background-color 0.15s ease-in-out, border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out, transform 0.12s ease-in-out !important;' +
+        '}' +
+        '#filter-sidebar-body .btn-primary:hover {' +
+        '  background-color: #0069d9 !important;' +
+        '  border-color: #0062cc !important;' +
+        '  transform: scale(1.05) !important;' +
+        '  box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.4) !important;' +
+        '}' +
+        '#filter-sidebar-body .btn-primary:active {' +
+        '  background-color: #0062cc !important;' +
+        '  border-color: #0062cc !important;' +
+        '  transform: scale(0.97) !important;' +
+        '  box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.5) !important;' +
+        '}' +
+        '#filter-sidebar-body .btn-secondary:hover {' +
+        '  background-color: #5a6268 !important;' +
+        '  border-color: #5a6268 !important;' +
+        '  transform: scale(1.05) !important;' +
+        '  box-shadow: 0 0 0 0.2rem rgba(108, 117, 125, 0.4) !important;' +
+        '}' +
+        '#filter-sidebar-body .btn-secondary:active {' +
+        '  background-color: #545b62 !important;' +
+        '  border-color: #545b62 !important;' +
+        '  transform: scale(0.97) !important;' +
+        '  box-shadow: 0 0 0 0.2rem rgba(108, 117, 125, 0.5) !important;' +
+        '}';
+      document.head.appendChild(sidebarBtnStyle);
+    }
+
     // -----------------------------------------------------------------------
     // recalcSidebarHeight — recompute sidebar height after a dropdown opens
-    // or closes so the sidebar expands/contracts smoothly.
+    // or closes. Use natural height (auto) so collapsed content is measured
+    // correctly; body has flex:1 so scrollHeight can stay large after collapse.
     // -----------------------------------------------------------------------
     function recalcSidebarHeight() {
       if (!sidebar) return;
       var b = document.getElementById("filter-sidebar-body");
       if (!b) return;
-      var hdrH = sidebar.querySelector(".filter-sidebar-header")
-        ? sidebar.querySelector(".filter-sidebar-header").offsetHeight : 50;
-      var pad = parseFloat(window.getComputedStyle(b).paddingTop)
-              + parseFloat(window.getComputedStyle(b).paddingBottom);
-      var totalH = b.scrollHeight + hdrH + pad;
-      sidebar.style.height = Math.min(totalH, window.innerHeight * 0.8) + "px";
-    }
-
-    // -----------------------------------------------------------------------
-    // setupCheckboxDropdowns — identical to map_mission_filter.js; turns each
-    // CheckboxSelectMultiple fieldset into a collapsible dark accordion so the
-    // home-page sidebar looks identical to the Missions-page sidebar.
-    // -----------------------------------------------------------------------
-    function setupCheckboxDropdowns(formEl) {
-      formEl.querySelectorAll('[id^="div_id_"]').forEach(function (outerDiv) {
-        var checks = outerDiv.querySelectorAll(".form-check");
-        if (checks.length === 0) return;
-
-        var toggleEl = outerDiv.querySelector("legend") ||
-                       outerDiv.querySelector("label.form-label");
-        if (!toggleEl) return;
-
-        var panel = checks[0].parentElement;
-        if (!panel) return;
-
-        // Avoid double-initialising if copyForm is retried.
-        if (toggleEl.dataset.dropdownInit) return;
-        toggleEl.dataset.dropdownInit = "1";
-
-        toggleEl.style.cssText =
-          "display:flex;justify-content:space-between;align-items:center;" +
-          "width:100%;max-width:230px;padding:0.3rem;box-sizing:border-box;" +
-          "background:#1e1e1e;border:1px solid #555;" +
-          "border-radius:4px;cursor:pointer;color:#e0e0e0;font-size:0.8rem;" +
-          "margin-bottom:0;user-select:none;";
-
-        var caret = document.createElement("span");
-        caret.innerHTML = "&#8964;";
-        caret.style.cssText =
-          "font-size:0.9rem;font-weight:bold;line-height:1;" +
-          "transition:transform 0.2s;flex-shrink:0;color:#e0e0e0;";
-        toggleEl.appendChild(caret);
-
-        toggleEl.addEventListener("mouseenter", function () {
-          toggleEl.style.boxShadow =
-            "inset 0 1px 1px rgba(0,0,0,0.075), 0 0 8px cornflowerblue";
-        });
-        toggleEl.addEventListener("mouseleave", function () {
-          toggleEl.style.boxShadow = "none";
-        });
-
-        var fieldset = outerDiv.querySelector("fieldset");
-        if (fieldset) {
-          fieldset.style.cssText = "border:none;padding:0;margin:0;min-width:0;";
-        }
-
-        panel.style.cssText =
-          "padding:0.15rem 0 0.15rem 10px;margin:0;" +
-          "background:#2a2a2a;border:1px solid #555;border-top:none;" +
-          "border-radius:0 0 4px 4px;";
-        panel.querySelectorAll(".form-check").forEach(function (chk) {
-          chk.style.marginBottom = "0";
-          chk.style.paddingTop = "0.15rem";
-          chk.style.paddingBottom = "0.15rem";
-          chk.style.minHeight = "unset";
-        });
-        panel.querySelectorAll(".form-check-label").forEach(function (lbl) {
-          lbl.style.color = "#e0e0e0";
-          lbl.style.fontSize = "0.8rem";
-          lbl.style.cursor = "pointer";
-          lbl.style.margin = "0";
-        });
-
-        var hasChecked = !!panel.querySelector("input[type='checkbox']:checked");
-        panel.style.display = hasChecked ? "block" : "none";
-        if (hasChecked) caret.style.transform = "rotate(180deg)";
-
-        toggleEl.addEventListener("click", function (e) {
-          e.preventDefault();
-          var open = panel.style.display !== "none";
-          panel.style.display = open ? "none" : "block";
-          caret.style.transform = open ? "" : "rotate(180deg)";
-          setTimeout(recalcSidebarHeight, 50);
+      var maxH = window.innerHeight * 0.8;
+      var bodyFlex = b.style.flex;
+      b.style.flex = "0 0 auto";
+      sidebar.style.height = "auto";
+      requestAnimationFrame(function () {
+        requestAnimationFrame(function () {
+          var natural = sidebar.offsetHeight;
+          sidebar.style.height = Math.min(natural, maxH) + "px";
+          b.style.flex = bodyFlex || "1";
         });
       });
     }
+
+    // setupCheckboxDropdowns is in project.js (shared with map_mission_filter.js).
 
     // Function to copy and style form based on selected filter type
     const copyForm = function (filterType = "mission") {
@@ -422,13 +431,14 @@ const FilterControl = L.Control.extend({
       filterBtn.style.setProperty("padding-left", "12px", "important");
       filterBtn.style.setProperty("padding-right", "12px", "important");
       filterBtn.style.setProperty("line-height", "26px", "important");
-      filterBtn.style.setProperty("border", "1px solid", "important");
-      filterBtn.style.setProperty("border-color", "#007bff", "important");
       filterBtn.style.setProperty("border-width", "1px", "important");
+      filterBtn.style.setProperty("border-style", "solid", "important");
+      filterBtn.style.setProperty("border-color", "#007bff");
       filterBtn.style.setProperty("box-sizing", "border-box", "important");
       filterBtn.style.setProperty("flex", "1 1 auto", "important");
       filterBtn.style.setProperty("align-self", "center", "important");
-      
+      filterBtn.style.setProperty("transition", "background-color 0.15s ease-in-out, border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out, transform 0.12s ease-in-out", "important");
+
       const clearBtn = document.createElement("button");
       clearBtn.type = "reset";
       clearBtn.id = filterType + "FilterCancel";
@@ -450,13 +460,14 @@ const FilterControl = L.Control.extend({
       clearBtn.style.setProperty("padding-left", "12px", "important");
       clearBtn.style.setProperty("padding-right", "12px", "important");
       clearBtn.style.setProperty("line-height", "26px", "important");
-      clearBtn.style.setProperty("border", "1px solid", "important");
-      clearBtn.style.setProperty("border-color", "#6c757d", "important");
       clearBtn.style.setProperty("border-width", "1px", "important");
+      clearBtn.style.setProperty("border-style", "solid", "important");
+      clearBtn.style.setProperty("border-color", "#6c757d");
       clearBtn.style.setProperty("box-sizing", "border-box", "important");
       clearBtn.style.setProperty("flex", "1 1 auto", "important");
       clearBtn.style.setProperty("align-self", "center", "important");
-      
+      clearBtn.style.setProperty("transition", "background-color 0.15s ease-in-out, border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out, transform 0.12s ease-in-out", "important");
+
       buttonRow.appendChild(filterBtn);
       buttonRow.appendChild(clearBtn);
       clonedForm.appendChild(buttonRow);
@@ -503,15 +514,23 @@ const FilterControl = L.Control.extend({
             e.preventDefault();
             e.stopPropagation();
             e.stopImmediatePropagation();
-            
-            // Store sidebar open state before reloading
-            sessionStorage.setItem('sidebarOpen', 'true');
-            
-            // Clear all filter parameters and reload current page
+            if (target.dataset.clearing === "true") { return false; }
+            target.dataset.clearing = "true";
+
+            target.textContent = "Clearing\u2026";
+            target.style.setProperty("background-color", "#545b62", "important");
+            target.style.setProperty("border-color", "#545b62", "important");
+            target.disabled = true;
+            target.setAttribute("aria-disabled", "true");
+
             const currentUrl = new URL(window.location.href);
-            const filterKeys = ['name', 'region_name', 'vehicle_name', 'platformtype', 'quality_categories', 'patch_test', 'repeat_survey', 'mgds_compilation', 'expedition__name', 'citation', 'filter_type', 'q', 'xmin', 'xmax', 'ymin', 'ymax', 'tmin', 'tmax'];
+            const filterKeys = ['name', 'region_name', 'vehicle_name', 'platformtype', 'quality_categories', 'patch_test', 'repeat_survey', 'mgds_compilation', 'expedition__name', 'citation', 'citation_search', 'filter_type', 'q', 'xmin', 'xmax', 'ymin', 'ymax', 'tmin', 'tmax'];
             filterKeys.forEach(key => currentUrl.searchParams.delete(key));
-            window.location.href = currentUrl.toString();
+            var clearUrl = currentUrl.toString();
+            sessionStorage.setItem('sidebarOpen', 'true');
+            setTimeout(function () {
+              window.location.href = clearUrl;
+            }, 80);
             return false;
           }
         }, true); // Capture phase - intercepts before onclick handlers
@@ -520,13 +539,24 @@ const FilterControl = L.Control.extend({
       // Add form submission handler to actually submit the form
       clonedForm.addEventListener("submit", function(e) {
         e.preventDefault(); // Prevent default submission
+        if (clonedForm.dataset.submitting === "true") { return false; }
+        clonedForm.dataset.submitting = "true";
+        var submitBtn = clonedForm.querySelector('[id$="FilterSubmit"]') ||
+                        clonedForm.querySelector('[type="submit"]');
+        if (submitBtn) {
+          submitBtn.textContent = "Filtering\u2026";
+          submitBtn.style.setProperty("background-color", "#0062cc", "important");
+          submitBtn.style.setProperty("border-color", "#0062cc", "important");
+          submitBtn.disabled = true;
+          submitBtn.setAttribute("aria-disabled", "true");
+        }
         // Get form data
         const formData = new FormData(clonedForm);
         const params = new URLSearchParams(formData);
         // Preserve current URL path and add filter parameters
         const currentUrl = new URL(window.location.href);
         // Clear existing filter params to avoid conflicts
-        const filterKeys = ['name', 'region_name', 'vehicle_name', 'platformtype', 'quality_categories', 'patch_test', 'repeat_survey', 'mgds_compilation', 'expedition__name', 'citation', 'filter_type'];
+        const filterKeys = ['name', 'region_name', 'vehicle_name', 'platformtype', 'quality_categories', 'patch_test', 'repeat_survey', 'mgds_compilation', 'expedition__name', 'citation', 'citation_search', 'filter_type'];
         filterKeys.forEach(key => currentUrl.searchParams.delete(key));
         // Add new filter params from form — use append() so that multi-value
         // fields (e.g. several quality_categories checkboxes) are preserved.
@@ -536,7 +566,10 @@ const FilterControl = L.Control.extend({
           }
         }
         // Reload page with filter parameters
-        window.location.href = currentUrl.toString();
+        var filterUrl = currentUrl.toString();
+        setTimeout(function () {
+          window.location.href = filterUrl;
+        }, 80);
       });
 
       const fieldCount = body.querySelectorAll(
@@ -872,10 +905,6 @@ const FilterControl = L.Control.extend({
       // Style buttons - find ALL buttons, not just .btn class
       // Make sure to include buttons we just created
       const allButtons = body.querySelectorAll("button");
-      console.log("Found buttons:", allButtons.length);
-      console.log("Button row exists:", body.querySelector(".button-row"));
-      console.log("Filter button exists:", body.querySelector("button[type='submit']"));
-      console.log("Clear button exists:", body.querySelector("button[type='reset']"));
       allButtons.forEach((btn) => {
         // Ensure button is visible
         btn.style.display = "block";
@@ -961,7 +990,7 @@ const FilterControl = L.Control.extend({
             // Clear all filter parameters and reload current page
             const currentUrl = new URL(window.location.href);
             // Remove all filter-related query parameters
-            const filterKeys = ['name', 'region_name', 'vehicle_name', 'platformtype', 'quality_categories', 'patch_test', 'repeat_survey', 'mgds_compilation', 'expedition__name', 'citation', 'filter_type', 'q', 'xmin', 'xmax', 'ymin', 'ymax', 'tmin', 'tmax'];
+            const filterKeys = ['name', 'region_name', 'vehicle_name', 'platformtype', 'quality_categories', 'patch_test', 'repeat_survey', 'mgds_compilation', 'expedition__name', 'citation', 'citation_search', 'filter_type', 'q', 'xmin', 'xmax', 'ymin', 'ymax', 'tmin', 'tmax'];
             filterKeys.forEach(key => currentUrl.searchParams.delete(key));
             // Reload page without filter parameters (stay on home/map page)
             window.location.href = currentUrl.toString();
@@ -1064,7 +1093,7 @@ const FilterControl = L.Control.extend({
       // Transform CheckboxSelectMultiple fieldsets into collapsible dark dropdowns
       // (vehicle_name, platformtype, quality_categories) — must run last so it
       // wins over any earlier display:block applied to .form-label elements.
-      setupCheckboxDropdowns(clonedForm);
+      setupCheckboxDropdowns(clonedForm, recalcSidebarHeight);
 
       // Auto-adjust sidebar height after form is copied
       setTimeout(function () {
@@ -1147,7 +1176,7 @@ const FilterControl = L.Control.extend({
                 // Clear all filter parameters and reload current page
                 const currentUrl = new URL(window.location.href);
                 // Remove all filter-related query parameters
-                const filterKeys = ['name', 'region_name', 'vehicle_name', 'platformtype', 'quality_categories', 'patch_test', 'repeat_survey', 'mgds_compilation', 'expedition__name', 'citation', 'filter_type', 'q', 'xmin', 'xmax', 'ymin', 'ymax', 'tmin', 'tmax'];
+                const filterKeys = ['name', 'region_name', 'vehicle_name', 'platformtype', 'quality_categories', 'patch_test', 'repeat_survey', 'mgds_compilation', 'expedition__name', 'citation', 'citation_search', 'filter_type', 'q', 'xmin', 'xmax', 'ymin', 'ymax', 'tmin', 'tmax'];
                 filterKeys.forEach(key => currentUrl.searchParams.delete(key));
                 // Reload page without filter parameters (stay on home/map page)
                 window.location.href = currentUrl.toString();
@@ -1182,7 +1211,7 @@ const FilterControl = L.Control.extend({
           // Re-apply collapsible dropdown transforms after form-label styling
           // (which would have overridden display:flex on the legend toggles).
           const switchedForm = body.querySelector("form");
-          if (switchedForm) setupCheckboxDropdowns(switchedForm);
+          if (switchedForm) setupCheckboxDropdowns(switchedForm, recalcSidebarHeight);
         }, 100);
       }
     };
@@ -1198,13 +1227,10 @@ const FilterControl = L.Control.extend({
     const maxRetries = 10;
     const tryCopyForm = function () {
       if (copyForm(currentFilterType)) {
-        console.log(`Form successfully copied to sidebar (${currentFilterType})`);
+        // form copied successfully
       } else {
         retryCount++;
         if (retryCount < maxRetries) {
-          console.log(
-            `Retrying form copy (attempt ${retryCount}/${maxRetries})...`
-          );
           setTimeout(tryCopyForm, 300);
         } else {
           console.error("Failed to copy form after", maxRetries, "attempts");
@@ -1227,10 +1253,7 @@ const FilterControl = L.Control.extend({
     // Helper function to show sidebar (slide out from left, button moves to right edge)
     function showSidebar() {
       sidebar.style.left = "0px"; // Slide sidebar out - left edge aligns with map edge (no gap)
-      // Button is 20px from map edge when closed, sidebar is 250px wide starting at 0px
-      // So button should be at 250px (right edge of sidebar)
-      container.style.left = "250px"; // Move button to right edge of sidebar
-      // Button stays on right edge - positioned relative to wrapper
+      buttonWrapper.style.left = "250px"; // Move button to right edge of sidebar
 
       // Auto-adjust sidebar height to fit content
       const body = document.getElementById("filter-sidebar-body");
@@ -1265,7 +1288,7 @@ const FilterControl = L.Control.extend({
     function hideSidebar() {
       if (!sidebarOpen) {
         sidebar.style.left = "-250px"; // Hide sidebar
-        container.style.left = "20px"; // Return button to 20px from left edge
+        buttonWrapper.style.left = "20px"; // Return button to 20px from left edge
         // Icon change is handled in click handler with animation
       }
     }
@@ -1390,16 +1413,26 @@ let feature = L.geoJSON(missions, {
       fill: false
     };
   },
-  hover: function () { },
   onEachFeature: function(feature, layer) {
     // layer._path is null here (path not created until layer is added to map).
     // Use the 'add' event, which fires after onAdd() has created _path.
     // smdb-track-line  — enables the :hover yellow-stroke rule in project.css.
     // smdb-geometry-line — marks this as a line geometry for baselayer-specific
     //                      stroke-color rules (GMRT rust, Google Hybrid orange).
+    var slug = (feature.properties && feature.properties.slug) ? feature.properties.slug : '';
     layer.on('add', function() {
       if (this._path) {
         this._path.classList.add('smdb-track-line', 'smdb-geometry-line');
+        if (slug) this._path.setAttribute('data-mission-slug', slug);
+        this._path.addEventListener('mouseover', function() { mapHighlightMission(slug); });
+        this._path.addEventListener('mouseout', function() {
+          // Debounce so moving from path to row doesn't flicker.
+          if (mapClearHighlightsTimeout) clearTimeout(mapClearHighlightsTimeout);
+          mapClearHighlightsTimeout = setTimeout(function() {
+            mapClearHighlightsTimeout = null;
+            mapClearAllMissionHighlights();
+          }, MAP_CLEAR_DEBOUNCE_MS);
+        });
       }
     });
   }
@@ -1428,37 +1461,49 @@ let feature = L.geoJSON(missions, {
   )
   // Popup Mission Info Tooltips
   .bindTooltip(function (layer) {
-    var tooltipInfo = layer.feature.properties.slug;
-    tooltipInfo = tooltipInfo.replace(/.*-/, "");
-    tooltipInfo = tooltipInfo.replace(/(\d)([^\d\s%])/g, "$1 $2");
-    let dateOfMission = tooltipInfo.substring(0, 8);
-    if ((browserName = "firefox") || (browserName = "safari")) {
-      dateOfMission = dateOfMission.replace(
-        /(\d{4})(\d{2})(\d{2})/g,
+    // --- Date: use start_date from GeoJSON first, fall back to slug parsing ---
+    var dateOfMission = "Unknown";
+    var rawStartDate = layer.feature.properties.start_date;
+    if (rawStartDate) {
+      var parsedDate = new Date(rawStartDate);
+      if (!isNaN(parsedDate.getTime())) {
+        dateOfMission = parsedDate.toLocaleDateString("en-us", {
+          weekday: "long",
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+        });
+      }
+    }
+    // Fall back to slug parsing if start_date is missing or unparseable
+    if (dateOfMission === "Unknown") {
+      var slugTail = layer.feature.properties.slug.replace(/.*-/, "");
+      slugTail = slugTail.replace(/(\d)([^\d\s%])/g, "$1 $2");
+      var datePart = slugTail.substring(0, 8).replace(
+        /(\d{4})(\d{2})(\d{2})/,
         "$1-$2-$3T00:00:00"
       );
-    } else {
-      dateOfMission = dateOfMission.replace(
-        /(\d{4})(\d{2})(\d{2})/g,
-        "$2-$3-$1"
-      );
+      var slugDate = new Date(datePart);
+      if (!isNaN(slugDate.getTime())) {
+        dateOfMission = slugDate.toLocaleDateString("en-us", {
+          weekday: "long",
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+        });
+      }
     }
 
-    dateOfMission = new Date(dateOfMission).toLocaleDateString("en-us", {
-      weekday: "long",
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-    });
+    // --- Route: show "Not Available" when no route file is recorded ---
+    var routeFile = layer.feature.properties.route_file || "Not Available";
 
-    let missionInfo = tooltipInfo.substring(tooltipInfo.indexOf(" ") + 1);
-    missionInfo = missionInfo.replace(/^\m/, "Mission ");
-    tooltipInfo =
-      layer.feature.properties.slug +
+    // --- Escape DB-backed values before inserting into tooltip HTML ---
+    var tooltipInfo =
+      escapeHtml(layer.feature.properties.slug) +
       "<br>Date: " +
       dateOfMission +
       "<br>Route: " +
-      layer.feature.properties.route_file;
+      escapeHtml(routeFile);
     return tooltipInfo;
   })
   .addTo(map);
@@ -1557,16 +1602,13 @@ map.whenReady(function() {
       // Get the zoom level that fitBounds calculated
       var calculatedZoom = map.getZoom();
       var finalCenter = map.getCenter();
-      console.log("Current map zoom level:", calculatedZoom);
-      console.log("Map center (Lat, Lng):", finalCenter.lat.toFixed(4), ",", finalCenter.lng.toFixed(4));
-      console.log("Mission bounds center (Lat, Lng):", ((sw.lat + ne.lat) / 2).toFixed(4), ",", ((sw.lng + ne.lng) / 2).toFixed(4));
-      
+
       // Allow fractional zoom for finer control when zooming in
       // No constraint on zooming out - let fitBounds determine optimal zoom to show all missions
       // Fractional zoom (0.5 increments) allows more precise zoom levels when user zooms in
     } catch (err) {
       // If getBounds fails (e.g., no features), set to default zoom level 3 and center
-      console.log("Error fitting bounds: " + err.message);
+      console.error("Error fitting bounds: " + err.message);
       map.setView([39.8423, -26.8945], 3, { animate: false });
     }
   }, 150);
@@ -1653,30 +1695,18 @@ setTimeout(function() {
       var adjustedLat = missionCenterLat - (ne.lat - missionCenterLat) * 0.1; // Shift 10% of upper half southward
       map.setView([adjustedLat, currentCenter.lng], map.getZoom(), { animate: false });
     }
-    
     // Log the zoom level after fitBounds in fallback setTimeout
     var finalZoom = map.getZoom();
     var finalCenterFallback = map.getCenter();
-    console.log("Current map zoom level (fallback setTimeout):", finalZoom);
-    console.log("Map center (Lat, Lng) - fallback:", finalCenterFallback.lat.toFixed(4), ",", finalCenterFallback.lng.toFixed(4));
-    console.log("Mission bounds center (Lat, Lng) - fallback:", ((sw.lat + ne.lat) / 2).toFixed(4), ",", ((sw.lng + ne.lng) / 2).toFixed(4));
-    
+
     // Fractional zoom enabled - allows 0.5 increments for finer zoom control
     // No zoom constraint - fitBounds determines optimal zoom to show all missions
   } catch (err) {
     // If getBounds fails (e.g., no features), set to default zoom level 3 and center
-    console.log("Error in fallback fitBounds: " + err.message);
+    console.error("Error in fallback fitBounds: " + err.message);
     map.setView([39.8423, -26.8945], 3, { animate: false });
   }
 }, 100);
-
-// Log final zoom level and center after all initialization is complete
-setTimeout(function() {
-  var finalZoomLevel = map.getZoom();
-  var finalMapCenter = map.getCenter();
-  console.log("=== FINAL MAP ZOOM LEVEL:", finalZoomLevel, "===");
-  console.log("=== FINAL MAP CENTER (Lat, Lng):", finalMapCenter.lat.toFixed(4), ",", finalMapCenter.lng.toFixed(4), "===");
-}, 500);
 
 /* --------------------------------------------------  */
 // Set up SIDEBAR
@@ -1715,10 +1745,8 @@ bounds.addTo(map);
 function getBoundsStatus() {
   var boundsStatus;
   if (document.getElementById("use_bounds").checked) {
-    // console.log("Bounds checkbox CHECKED!");
     boundsStatus = true;
   } else {
-    // console.log("Bounds checkbox UNCHECKED!");
     boundsStatus = false;
   }
   return boundsStatus;
@@ -1728,10 +1756,8 @@ function getBoundsStatus() {
 function getSliderStatus() {
   var sliderStatus;
   if (document.getElementById("use_time").checked) {
-    // console.log("SliderControl Time checkbox CHECKED!");
     sliderStatus = true;
   } else {
-    // console.log("SliderControl Time checkbox UNCHECKED!");
     sliderStatus = false;
   }
   return sliderStatus;
@@ -1846,7 +1872,11 @@ var DrawSquareButton = L.Control.extend({
     // Draw Square button - same settings as filter button
     const container = L.DomUtil.create("div", "draw-square-control", wrapper);
     container.id = "drawSquare-button";
-    container.title = "Draw a square around missions to create an exportable list.";
+    container.setAttribute("aria-label", "Draw a square around missions to create an exportable list.");
+    // Custom tooltip (same class as Filter so both use identical styling)
+    const tooltipEl = L.DomUtil.create("span", "map-control-tooltip", wrapper);
+    tooltipEl.textContent = "Draw a square around missions to create an exportable list";
+    tooltipEl.setAttribute("role", "tooltip");
     container.style.width = "40px";
     container.style.height = "40px";
     container.style.backgroundColor = "hsla(0, 0%, 100%, 0.75)"; // Semi-transparent white like other controls
@@ -1921,7 +1951,6 @@ function styleDrawSquareControl() {
   const controlContainer = drawSquareButton.getContainer();
   
   if (!controlContainer) {
-    console.log("Control container not found, retrying...");
     setTimeout(styleDrawSquareControl, 100);
     return;
   }
@@ -1954,11 +1983,7 @@ function styleDrawSquareControl() {
     // Add a class and ID for CSS targeting
     leafletControlDiv.classList.add("draw-square-control-wrapper");
     leafletControlDiv.id = "draw-square-control-wrapper";
-    console.log("Applied styles to draw square control wrapper");
-    console.log("Current margin-left:", leafletControlDiv.style.marginLeft);
-    console.log("Computed margin-left:", window.getComputedStyle(leafletControlDiv).marginLeft);
   } else {
-    console.log("Could not find .leaflet-control wrapper, retrying...");
     setTimeout(styleDrawSquareControl, 100);
   }
 }
@@ -1994,7 +2019,7 @@ map.on(L.Draw.Event.CREATED, function (e) {
     // Get current filter parameters from URL
     var urlParams = new URLSearchParams(window.location.search);
     var filterParams = {};
-    var filterKeys = ['name', 'region_name', 'vehicle_name', 'platformtype', 'quality_categories', 'patch_test', 'repeat_survey', 'mgds_compilation', 'expedition__name', 'citation', 'filter_type', 'q', 'tmin', 'tmax'];
+    var filterKeys = ['name', 'region_name', 'vehicle_name', 'platformtype', 'quality_categories', 'patch_test', 'repeat_survey', 'mgds_compilation', 'expedition__name', 'citation', 'citation_search', 'filter_type', 'q', 'tmin', 'tmax'];
     filterKeys.forEach(function(key) {
       if (urlParams.has(key)) {
         filterParams[key] = urlParams.get(key);
@@ -2122,7 +2147,6 @@ function fnBrowserDetect() {
   } else {
     browserName = "No browser detection";
   }
-  // console.log("You are using " + browserName + " browser");
   return browserName;
 }
 // The grouped-layer control (L.control.groupedLayers) does not always fire the
@@ -2162,7 +2186,7 @@ L.Control.Measure.include({
 });
 
 // Function to force blue color on capture markers and measurement paths
-function forceBlueCaptureMarkers() {
+function forceGreenCaptureMarkers() {
   // Find ALL circles and paths in the map and check if they're capture markers
   document.querySelectorAll('svg circle, svg path, circle, path').forEach(function(element) {
     var parent = element.closest('.leaflet-marker-icon, .leaflet-div-icon');
@@ -2203,11 +2227,11 @@ function forceBlueCaptureMarkers() {
                        path.closest('.leaflet-measure') !== null ||
                        (path._leaflet_id && map.hasLayer && map.hasLayer(path));
     
-    if (isMeasurement || (!path.classList.contains('leaflet-measure-resultline') && 
+    if (isMeasurement || (!path.classList.contains('leaflet-measure-resultline') &&
                          !path.classList.contains('leaflet-measure-resultarea') &&
-                         path.getAttribute('stroke') === 'rgb(0, 102, 204)' || 
-                         path.style.stroke === 'rgb(0, 102, 204)' ||
-                         path.style.stroke === '#0066CC')) {
+                         (path.getAttribute('stroke') === 'rgb(0, 102, 204)' ||
+                          path.style.stroke === 'rgb(0, 102, 204)' ||
+                          path.style.stroke === '#0066CC'))) {
       path.classList.add('leaflet-measure-path');
       path.style.stroke = '#ABE67E';  // Green - matching leaflet-measure theme
       path.setAttribute('stroke', '#ABE67E');
@@ -2217,7 +2241,7 @@ function forceBlueCaptureMarkers() {
 
 // Style capture markers to match active measurement color (without breaking click functionality)
 var captureMarkerObserver = new MutationObserver(function(mutations) {
-  forceBlueCaptureMarkers();
+  forceGreenCaptureMarkers();
 });
 
 // Start observing the map container for changes
@@ -2231,7 +2255,7 @@ captureMarkerObserver.observe(map.getContainer(), {
 // Also check periodically when measurement is active
 setInterval(function() {
   if (measure && measure._measuring) {
-    forceBlueCaptureMarkers();
+    forceGreenCaptureMarkers();
   }
 }, 100);
 
@@ -2399,7 +2423,7 @@ function applyColorToLayer(layer, color) {
   }
   
   // Our CSS uses !important on measure result paths, so we must set inline style with
-  // !important for the user's color to win. Also mark layer so forceBlueCaptureMarkers skips it.
+  // !important for the user's color to win. Also mark layer so forceGreenCaptureMarkers skips it.
   if (layer._path) {
     layer._path.style.setProperty('stroke', rgbString, 'important');
     layer._path.style.setProperty('stroke-width', '3.5', 'important');
@@ -2439,7 +2463,6 @@ L.Control.Layers.include({
     this._groupedLayers.forEach(function (obj) {
       // Check if it's an overlay and added to the map
       if (obj.overlay && this._map.hasLayer(obj.layer)) {
-        console.log("OBJECT OVERLAY");
         // Push layer to active array
         active.push(obj.layer);
       }
@@ -2471,376 +2494,122 @@ L.Control.Layers.include({
   },
 });
 
-// Results Panel Functions
+// Results panel: same behavior as Missions page (map_mission_filter.js).
 function showResultsPanel(loading) {
   var panel = document.getElementById("selection-results-panel");
   if (!panel) {
-    // Create results panel if it doesn't exist
     panel = document.createElement("div");
     panel.id = "selection-results-panel";
     panel.className = "selection-results-panel";
-    panel.innerHTML = `
-      <div class="selection-results-header">
-        <h5>Selected Missions</h5>
-        <button type="button" class="btn-close" onclick="hideResultsPanel()" aria-label="Close">×</button>
-      </div>
-      <div class="selection-results-body">
-        <div id="selection-results-content"></div>
-      </div>
-      <div class="resize-handle resize-handle-n"></div>
-      <div class="resize-handle resize-handle-e"></div>
-      <div class="resize-handle resize-handle-s"></div>
-      <div class="resize-handle resize-handle-w"></div>
-      <div class="resize-handle resize-handle-ne"></div>
-      <div class="resize-handle resize-handle-nw"></div>
-      <div class="resize-handle resize-handle-se"></div>
-      <div class="resize-handle resize-handle-sw"></div>
-    `;
+    panel.innerHTML =
+      '<div class="selection-results-header">' +
+        '<h5>Selected Missions</h5>' +
+        '<button type="button" class="btn-close" onclick="hideResultsPanel()" aria-label="Close">\xd7</button>' +
+      "</div>" +
+      '<div class="selection-results-body">' +
+        '<div id="selection-results-content"></div>' +
+      "</div>" +
+      '<div class="resize-handle resize-handle-n"></div>' +
+      '<div class="resize-handle resize-handle-e"></div>' +
+      '<div class="resize-handle resize-handle-s"></div>' +
+      '<div class="resize-handle resize-handle-w"></div>' +
+      '<div class="resize-handle resize-handle-ne"></div>' +
+      '<div class="resize-handle resize-handle-nw"></div>' +
+      '<div class="resize-handle resize-handle-se"></div>' +
+      '<div class="resize-handle resize-handle-sw"></div>';
     document.body.appendChild(panel);
-    
-    // Prevent clicks on panel from propagating to map (prevents accidental closing)
-    panel.addEventListener('click', function(e) {
+
+    panel.addEventListener("click", function (e) { e.stopPropagation(); });
+    panel.addEventListener("mousedown", function (e) { e.stopPropagation(); });
+    panel.addEventListener("wheel", function (e) {
       e.stopPropagation();
-    });
-    
-    // Prevent mousedown events from propagating to map
-    panel.addEventListener('mousedown', function(e) {
-      e.stopPropagation();
-    });
-    
-    // Prevent wheel events from propagating to map (allows panel to scroll)
-    panel.addEventListener('wheel', function(e) {
-      e.stopPropagation();
-      
-      // Find the scrollable container (selection-results-body)
-      var body = panel.querySelector('.selection-results-body');
-      if (body) {
-        var scrollHeight = body.scrollHeight;
-        var clientHeight = body.clientHeight;
-        
-        // Check if we can scroll
-        if (scrollHeight > clientHeight) {
-          // Prevent default map zoom/pan behavior
-          e.preventDefault();
-          
-          // Scroll the body
-          var delta = e.deltaY;
-          body.scrollTop += delta;
-          
-          // Prevent further propagation
-          e.stopImmediatePropagation();
-        }
+      var b = panel.querySelector(".selection-results-body");
+      if (b && b.scrollHeight > b.clientHeight) {
+        e.preventDefault();
+        b.scrollTop += e.deltaY;
+        e.stopImmediatePropagation();
       }
     }, { passive: false });
-    
-    // Detect when mouse is over scrollbar area and disable resize handles
-    var body = panel.querySelector('.selection-results-body');
-    if (body) {
-      body.addEventListener('mousemove', function(e) {
-        var rect = body.getBoundingClientRect();
-        var scrollbarWidth = 17; // Typical scrollbar width
-        var scrollbarHeight = 17; // Typical scrollbar height
-        
-        // Check if mouse is in scrollbar area (right edge for vertical, bottom for horizontal)
-        var isOverVerticalScrollbar = (e.clientX >= rect.right - scrollbarWidth && e.clientX <= rect.right);
-        var isOverHorizontalScrollbar = (e.clientY >= rect.bottom - scrollbarHeight && e.clientY <= rect.bottom);
-        // Check if mouse is in the scrollbar intersection (bottom-right corner where scrollbars meet)
-        var isOverScrollbarIntersection = isOverVerticalScrollbar && isOverHorizontalScrollbar;
-        
-        // Get resize handles
-        var handleE = panel.querySelector('.resize-handle-e');
-        var handleS = panel.querySelector('.resize-handle-s');
-        var handleSE = panel.querySelector('.resize-handle-se');
-        
-        // Disable right edge handle when over vertical scrollbar (but not intersection)
-        if (handleE) {
-          if (isOverVerticalScrollbar && !isOverScrollbarIntersection) {
-            handleE.classList.add('scrollbar-active');
-          } else {
-            handleE.classList.remove('scrollbar-active');
-          }
-        }
-        
-        // Disable bottom handle when over horizontal scrollbar (but not intersection)
-        if (handleS) {
-          if (isOverHorizontalScrollbar && !isOverScrollbarIntersection) {
-            handleS.classList.add('scrollbar-active');
-          } else {
-            handleS.classList.remove('scrollbar-active');
-          }
-        }
-        
-        // Bottom-right corner handle is always active (never disabled)
-        // The reserved space prevents scrollbars from overlapping it
-        if (handleSE) {
-          handleSE.classList.remove('scrollbar-active');
-        }
-      });
-      
-      body.addEventListener('mouseleave', function() {
-        // Remove scrollbar-active when mouse leaves body
-        var handleE = panel.querySelector('.resize-handle-e');
-        var handleS = panel.querySelector('.resize-handle-s');
-        var handleSE = panel.querySelector('.resize-handle-se');
-        if (handleE) handleE.classList.remove('scrollbar-active');
-        if (handleS) handleS.classList.remove('scrollbar-active');
-        if (handleSE) handleSE.classList.remove('scrollbar-active');
+
+    var isDragging = false, dragOffX = 0, dragOffY = 0;
+    var panelHeader = panel.querySelector(".selection-results-header");
+    if (panelHeader) {
+      panelHeader.addEventListener("mousedown", function (e) {
+        if (e.target.classList.contains("btn-close")) return;
+        isDragging = true;
+        var rect = panel.getBoundingClientRect();
+        var pixLeft = rect.left;
+        var pixTop  = rect.top;
+        dragOffX = e.clientX - pixLeft;
+        dragOffY = e.clientY - pixTop;
+        // Lock pixel position before removing transform so the panel does not
+        // jump when CSS centers it with translate(-50%,-50%).
+        panel.style.transform = "none";
+        panel.style.left = pixLeft + "px";
+        panel.style.top  = pixTop  + "px";
+        e.preventDefault();
       });
     }
-    
-    // Initialize drag functionality
-    initializePanelDrag(panel);
-    
-    // Initialize resize functionality
-    initializePanelResize(panel);
+    document.addEventListener("mousemove", function (e) {
+      if (!isDragging) return;
+      panel.style.left = e.clientX - dragOffX + "px";
+      panel.style.top  = e.clientY - dragOffY + "px";
+    });
+    document.addEventListener("mouseup", function () { isDragging = false; });
+
+    attachResizeHandles(panel);
   }
+
   panel.style.display = "flex";
-  
-  // Force a synchronous layout calculation to ensure panel is rendered
-  panel.offsetHeight;
-  
-  // Convert CSS percentage transform to pixel transform immediately
-  // This must happen synchronously before any user interaction
-  var currentTransform = panel.style.transform || '';
-  if (!currentTransform || currentTransform.indexOf('%') !== -1) {
-    var rect = panel.getBoundingClientRect();
-    var currentCenterX = rect.left + rect.width / 2;
-    var currentCenterY = rect.top + rect.height / 2;
-    var viewportCenterX = window.innerWidth / 2;
-    var viewportCenterY = window.innerHeight / 2;
-    var pixelOffsetX = currentCenterX - viewportCenterX;
-    var pixelOffsetY = currentCenterY - viewportCenterY;
-    
-    panel.style.transform = 'translate(' + pixelOffsetX + 'px, ' + pixelOffsetY + 'px)';
-    
-    // Force reflow
-    panel.offsetHeight;
-    
-    // Mark as converted so dragStart doesn't convert again
-    panel._transformConverted = true;
-  } else {
-    panel._transformConverted = true;
-  }
-  
   if (loading) {
-    document.getElementById("selection-results-content").innerHTML = '<div class="text-center p-3"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div>';
+    var content = document.getElementById("selection-results-content");
+    if (content)
+      content.innerHTML =
+        '<div class="text-center p-3"><div class="spinner-border" role="status"><span class="visually-hidden">Loading...</span></div></div>';
   }
 }
 
-// Initialize drag functionality for panel
-function initializePanelDrag(panel) {
-  var header = panel.querySelector('.selection-results-header');
-  var isDragging = false;
-  var startX = 0;
-  var startY = 0;
-  var startLeft = 0;
-  var startTop = 0;
-
-  header.addEventListener('mousedown', dragStart);
-  document.addEventListener('mousemove', drag);
-  document.addEventListener('mouseup', dragEnd);
-
-  function dragStart(e) {
-    // Don't start drag if clicking the close button
-    if (e.target.classList.contains('btn-close') || e.target.closest('.btn-close')) {
-      return;
-    }
-    
-    if (e.target === header || header.contains(e.target)) {
+function attachResizeHandles(panel) {
+  var handles = panel.querySelectorAll(".resize-handle");
+  handles.forEach(function (handle) {
+    handle.addEventListener("mousedown", function (e) {
       e.preventDefault();
       e.stopPropagation();
-      
-      // Get current mouse position
-      startX = e.clientX;
-      startY = e.clientY;
-      
-      // Get current panel position - use getBoundingClientRect for actual rendered position
-      // This gives us the true visual position regardless of transform type
+      var startX = e.clientX, startY = e.clientY;
       var rect = panel.getBoundingClientRect();
-      startLeft = rect.left;
-      startTop = rect.top;
-      
-      isDragging = true;
-      header.style.cursor = 'move';
-    }
-  }
+      var startW = rect.width, startH = rect.height;
+      var startL = rect.left, startT = rect.top;
+      var isN  = handle.classList.contains("resize-handle-n");
+      var isS  = handle.classList.contains("resize-handle-s");
+      var isE  = handle.classList.contains("resize-handle-e");
+      var isW  = handle.classList.contains("resize-handle-w");
+      var isNE = handle.classList.contains("resize-handle-ne");
+      var isNW = handle.classList.contains("resize-handle-nw");
+      var isSE = handle.classList.contains("resize-handle-se");
+      var isSW = handle.classList.contains("resize-handle-sw");
 
-  function drag(e) {
-    if (isDragging) {
-      e.preventDefault();
-      
-      // On first drag movement, ensure transform is in pixels
-      if (!panel._dragTransformConverted) {
-        var currentTransform = panel.style.transform || '';
-        
-        if (!currentTransform || currentTransform.indexOf('%') !== -1) {
-          // Convert to pixels using current position BEFORE any movement
-          // Use the startLeft/startTop we captured in dragStart
-          var panelWidth = panel.offsetWidth;
-          var panelHeight = panel.offsetHeight;
-          var panelCenterX = startLeft + panelWidth / 2;
-          var panelCenterY = startTop + panelHeight / 2;
-          var viewportCenterX = window.innerWidth / 2;
-          var viewportCenterY = window.innerHeight / 2;
-          var pixelOffsetX = panelCenterX - viewportCenterX;
-          var pixelOffsetY = panelCenterY - viewportCenterY;
-          
-          panel.style.transform = 'translate(' + pixelOffsetX + 'px, ' + pixelOffsetY + 'px)';
-          
-          // Force reflow
-          panel.offsetHeight;
-          
-          // Get position AFTER transform change
-          var rectAfter = panel.getBoundingClientRect();
-          
-          // Update start positions if panel moved
-          if (Math.abs(rectAfter.left - startLeft) > 0.1 || Math.abs(rectAfter.top - startTop) > 0.1) {
-            startLeft = rectAfter.left;
-            startTop = rectAfter.top;
-          }
-        }
-        panel._dragTransformConverted = true;
+      // Lock pixel position before removing transform so the panel doesn't jump
+      // (East/South/SE handles never set left/top in onMove, so without this the
+      // panel snaps to left:50%;top:50% without the centering translate).
+      panel.style.left = startL + "px";
+      panel.style.top  = startT + "px";
+      panel.style.transform = "none";
+
+      function onMove(ev) {
+        var dx = ev.clientX - startX, dy = ev.clientY - startY;
+        if (isE  || isNE || isSE) panel.style.width  = Math.max(300, startW + dx) + "px";
+        if (isW  || isNW || isSW) { panel.style.width = Math.max(300, startW - dx) + "px"; panel.style.left = startL + dx + "px"; }
+        if (isS  || isSE || isSW) panel.style.height = Math.max(200, startH + dy) + "px";
+        if (isN  || isNE || isNW) { panel.style.height = Math.max(200, startH - dy) + "px"; panel.style.top = startT + dy + "px"; }
       }
-      
-      // Calculate how far mouse has moved
-      var deltaX = e.clientX - startX;
-      var deltaY = e.clientY - startY;
-      
-      // Calculate new panel position (top-left corner)
-      var newLeft = startLeft + deltaX;
-      var newTop = startTop + deltaY;
-      
-      // IMPORTANT: Panel has left: 50% and top: 50%, which means its top-left corner is at viewport center
-      // When we apply transform: translate(Xpx, Ypx), the top-left corner ends up at:
-      // (viewportCenterX + X, viewportCenterY + Y)
-      // So to get the top-left at newLeft, newTop:
-      // newLeft = viewportCenterX + transformX
-      // newTop = viewportCenterY + transformY
-      // Therefore:
-      var viewportCenterX = window.innerWidth / 2;
-      var viewportCenterY = window.innerHeight / 2;
-      
-      // Calculate transform needed to position top-left at newLeft, newTop
-      var transformX = newLeft - viewportCenterX;
-      var transformY = newTop - viewportCenterY;
-      
-      panel.style.transform = 'translate(' + transformX + 'px, ' + transformY + 'px)';
-    }
-  }
-  
-  function dragEnd(e) {
-    if (isDragging) {
-      isDragging = false;
-      header.style.cursor = 'default';
-      panel._dragTransformConverted = false;
-    }
-  }
-}
-
-// Initialize resize functionality for panel
-function initializePanelResize(panel) {
-  if (!panel) return;
-  
-  var resizeHandles = panel.querySelectorAll('.resize-handle');
-  if (!resizeHandles || resizeHandles.length === 0) {
-    return; // No resize handles found, skip initialization
-  }
-  
-  var isResizing = false;
-  var currentHandle = null;
-  var startX, startY, startWidth, startHeight, startLeft, startTop, startTransformX, startTransformY;
-
-  resizeHandles.forEach(function(handle) {
-    handle.addEventListener('mousedown', function(e) {
-      e.preventDefault();
-      e.stopPropagation();
-      isResizing = true;
-      currentHandle = handle;
-      startX = e.clientX;
-      startY = e.clientY;
-      startWidth = parseInt(document.defaultView.getComputedStyle(panel).width, 10);
-      startHeight = parseInt(document.defaultView.getComputedStyle(panel).height, 10);
-      
-      // Get current position accounting for transform
-      var rect = panel.getBoundingClientRect();
-      startLeft = rect.left;
-      startTop = rect.top;
-      
-      // Parse current transform
-      var transform = panel.style.transform || '';
-      var match = transform.match(/translate\(([^,]+),\s*([^)]+)\)/);
-      startTransformX = match ? parseFloat(match[1]) : 0;
-      startTransformY = match ? parseFloat(match[2]) : 0;
-      
-      document.addEventListener('mousemove', doResize);
-      document.addEventListener('mouseup', stopResize);
+      function onUp() {
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+      }
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
     });
   });
-
-  function doResize(e) {
-    if (!isResizing) return;
-    
-    var deltaX = e.clientX - startX;
-    var deltaY = e.clientY - startY;
-    
-    var width = startWidth;
-    var height = startHeight;
-    var transformX = startTransformX;
-    var transformY = startTransformY;
-    
-    if (currentHandle.classList.contains('resize-handle-e')) {
-      width = startWidth + deltaX;
-    } else if (currentHandle.classList.contains('resize-handle-w')) {
-      width = startWidth - deltaX;
-      transformX = startTransformX + deltaX;
-    } else if (currentHandle.classList.contains('resize-handle-s')) {
-      height = startHeight + deltaY;
-    } else if (currentHandle.classList.contains('resize-handle-n')) {
-      height = startHeight - deltaY;
-      transformY = startTransformY + deltaY;
-    } else if (currentHandle.classList.contains('resize-handle-se')) {
-      width = startWidth + deltaX;
-      height = startHeight + deltaY;
-    } else if (currentHandle.classList.contains('resize-handle-sw')) {
-      width = startWidth - deltaX;
-      height = startHeight + deltaY;
-      transformX = startTransformX + deltaX;
-    } else if (currentHandle.classList.contains('resize-handle-ne')) {
-      width = startWidth + deltaX;
-      height = startHeight - deltaY;
-      transformY = startTransformY + deltaY;
-    } else if (currentHandle.classList.contains('resize-handle-nw')) {
-      width = startWidth - deltaX;
-      height = startHeight - deltaY;
-      transformX = startTransformX + deltaX;
-      transformY = startTransformY + deltaY;
-    }
-    
-    // Apply min/max constraints
-    var minWidth = 400;
-    var minHeight = 300;
-    var maxWidth = window.innerWidth - 20;
-    var maxHeight = window.innerHeight - 20;
-    
-    width = Math.max(minWidth, Math.min(maxWidth, width));
-    height = Math.max(minHeight, Math.min(maxHeight, height));
-    
-    // Set width and height with box-sizing
-    panel.style.width = width + 'px';
-    panel.style.height = height + 'px';
-    panel.style.boxSizing = 'border-box';
-    panel.style.transform = 'translate(' + transformX + 'px, ' + transformY + 'px)';
-    
-    // Force reflow to ensure content adjusts
-    panel.offsetHeight;
-  }
-
-  function stopResize() {
-    isResizing = false;
-    currentHandle = null;
-    document.removeEventListener('mousemove', doResize);
-    document.removeEventListener('mouseup', stopResize);
-  }
 }
 
 function hideResultsPanel() {
@@ -2892,8 +2661,9 @@ function updateResultsPanel(message, missions) {
   html += '<tbody>';
   
   missions.forEach(function(mission) {
-    html += '<tr>';
-    html += '<td><a href="' + window.location.origin + '/missions/' + (mission.slug ? encodeURIComponent(mission.slug) : '') + '/">' + escapeHtml(mission.name) + '</a></td>';
+    var missionSlug = mission.slug ? String(mission.slug) : '';
+    html += '<tr' + (missionSlug ? ' data-mission-slug="' + escapeHtml(missionSlug) + '"' : '') + '>';
+    html += '<td><a href="/missions/' + (missionSlug ? escapeHtml(missionSlug) : '') + '/">' + escapeHtml(mission.name) + '</a></td>';
     html += '<td>' + (mission.start_date || '-') + '</td>';
     html += '<td>' + (mission.region_name || '-') + '</td>';
     html += '<td>' + (mission.track_length || '-') + '</td>';
@@ -2908,6 +2678,20 @@ function updateResultsPanel(message, missions) {
   html += '</div>';
   
   content.innerHTML = html;
+
+  // Bidirectional hover: row hover highlights track (issue #293), debounced to prevent flicker.
+  content.querySelectorAll('tr[data-mission-slug]').forEach(function(tr) {
+    var slug = tr.getAttribute('data-mission-slug');
+    if (!slug) return;
+    tr.addEventListener('mouseover', function() { mapHighlightMission(slug); });
+    tr.addEventListener('mouseout', function() {
+      if (mapClearHighlightsTimeout) clearTimeout(mapClearHighlightsTimeout);
+      mapClearHighlightsTimeout = setTimeout(function() {
+        mapClearHighlightsTimeout = null;
+        mapClearAllMissionHighlights();
+      }, MAP_CLEAR_DEBOUNCE_MS);
+    });
+  });
   
   // Store missions for export
   window.selectedMissions = missions;
@@ -2986,7 +2770,7 @@ function exportMissions(format) {
   // Build query string from current filter params
   var urlParams = new URLSearchParams(window.location.search);
   var filterParams = {};
-  var filterKeys = ['name', 'region_name', 'vehicle_name', 'platformtype', 'quality_categories', 'patch_test', 'repeat_survey', 'mgds_compilation', 'expedition__name', 'citation', 'filter_type', 'q', 'tmin', 'tmax'];
+  var filterKeys = ['name', 'region_name', 'vehicle_name', 'platformtype', 'quality_categories', 'patch_test', 'repeat_survey', 'mgds_compilation', 'expedition__name', 'citation', 'citation_search', 'filter_type', 'q', 'tmin', 'tmax'];
   filterKeys.forEach(function(key) {
     if (urlParams.has(key)) {
       filterParams[key] = urlParams.get(key);

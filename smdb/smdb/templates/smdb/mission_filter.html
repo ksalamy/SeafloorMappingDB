@@ -6,16 +6,26 @@
 {% block css %}
   {{ block.super }}
   <link rel="stylesheet" type="text/css" href="{% static 'css/map_mission_filter.css' %}">
-  <link rel="stylesheet" type="text/css" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css">
+  <link rel="stylesheet" type="text/css" href="https://unpkg.com/leaflet@1.8.0/dist/leaflet.css">
   {# Leaflet.draw for Draw Rectangle (box search) control #}
   <link rel="stylesheet" type="text/css"
     href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.draw/1.0.4/leaflet.draw.css"
-    integrity="sha384-NZLkVuBRMEeB4VeZz27WwTRvlhec30biQ8Xx7zG7JJnkvEKRg5qi6BNbEXo9ydwv"
     crossorigin="anonymous">
 {% endblock %}
 
 {% block javascript %}
     {{ block.super }}
+    <script>
+      (function () {
+        if (document.body) {
+          document.body.classList.add('missions-page');
+        } else {
+          document.addEventListener('DOMContentLoaded', function () {
+            document.body.classList.add('missions-page');
+          });
+        }
+      })();
+    </script>
     <!-- Load Leaflet from CDN -->
     <script src="https://unpkg.com/leaflet@1.8.0/dist/leaflet.js"
     integrity="sha384-4Dmmo81xejNChaqLOci80VhUcuEAD5pXpCtqtizmdgWEzdETh3zrJvzOhU4T79cN"
@@ -55,18 +65,18 @@
       {% endif %}
     </div>
 
-    {# Fallback form rendered when JavaScript is disabled #}
+    {# Fallback styling when JavaScript is disabled: show the existing form container #}
     <noscript>
-      {% if filter %}
-        <div class="mb-3">
-          {% crispy filter.form filter.form.helper %}
-        </div>
-      {% endif %}
+      <style>
+        #filter-form-container {
+          display: block !important;
+        }
+      </style>
     </noscript>
 
     {{ missions|json_script:"missions-data" }}
     <div id="map_mission_filter" style="height: 50vh; min-height: 300px;"></div>
-    <script src="{% static 'js/map_mission_filter.js' %}"></script>
+    <script defer src="{% static 'js/map_mission_filter.js' %}"></script>
 
     <div id="mission-table-wrapper">
       {% if table %}

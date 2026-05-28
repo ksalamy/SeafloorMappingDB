@@ -139,7 +139,7 @@ def test_mission_export_api_with_empty_dates(client):
     assert response.status_code != 500
 
 
-def test_mission_table_view_with_bbox(client):
+def test_mission_table_view_with_bbox(client, missions_notes_5):
     """MissionTableView applies bbox filtering — tight box excludes all Monterey fixtures."""
     url = reverse("missions")
 
@@ -175,7 +175,7 @@ def test_mission_table_view_bbox_invalid_coords(client):
     assert response.status_code == 200
 
 
-def test_mission_table_view_bbox_inverted_coords(client):
+def test_mission_table_view_bbox_inverted_coords(client, missions_notes_5):
     """MissionTableView rejects inverted bbox (xmin > xmax) — no 500, zero results."""
     url = reverse("missions")
     response = client.get(url, {
@@ -195,7 +195,7 @@ def test_mission_table_view_bbox_inverted_coords(client):
     )
 
 
-def test_mission_table_view_bbox_and_map_context_consistent(client):
+def test_mission_table_view_bbox_and_map_context_consistent(client, missions_notes_5):
     """Map GeoJSON context is a subset of the table queryset for the same bbox."""
     url = reverse("missions")
     response = client.get(url, {
@@ -206,29 +206,141 @@ def test_mission_table_view_bbox_and_map_context_consistent(client):
     missions_geojson = response.context["missions"]
     assert missions_geojson is not None
 
-    # Collect IDs from the table queryset (object_list from ListView).
-    table_ids = {
-        m.id for m in response.context.get("object_list", []) if hasattr(m, "id")
+    # Collect slugs from the table queryset (object_list from ListView).
+    table_slugs = {
+        m.slug
+        for m in response.context.get("object_list", [])
+        if hasattr(m, "slug") and m.slug is not None
     }
 
-    # Collect IDs from the GeoJSON used by the map.
+    # Collect slugs from the GeoJSON used by the map.
     if isinstance(missions_geojson, dict):
         features = missions_geojson.get("features", [])
     elif isinstance(missions_geojson, list):
         features = missions_geojson
     else:
         features = []
-    map_ids = {
-        f.get("properties", {}).get("id")
+    map_slugs = {
+        f.get("properties", {}).get("slug")
         for f in features
-        if isinstance(f, dict) and f.get("properties", {}).get("id") is not None
+        if isinstance(f, dict) and f.get("properties", {}).get("slug") is not None
     }
 
     # Every mission on the map must also appear in the table queryset.
-    assert map_ids.issubset(table_ids), (
-        f"Map missions {map_ids - table_ids} are not in the table queryset. "
+    assert map_slugs.issubset(table_slugs), (
+        f"Map missions {map_slugs - table_slugs} are not in the table queryset. "
         "Check MissionTableView bbox filtering logic."
     )
+
+
+# -------- Mission page: sidebar filter, Draw Square, table integration --------
+
+
+# Bbox that contains the missions_notes_5 fixture nav_tracks (Monterey Bay area).
+_MONTEREY_BBOX = {
+    "xmin": "-123",
+    "xmax": "-121",
+    "ymin": "36",
+    "ymax": "37",
+}
+
+
+def test_mission_select_api_applies_vehicle_name_filter(client, missions_notes_5):
+    """Draw Square API respects vehicle_name: bbox + vehicle_name returns only matching missions."""
+    from smdb.models import Mission
+
+    # Give one mission a distinct vehicle_name; leave others null or different.
+    missions = list(Mission.objects.all()[:3])
+    if missions:
+        missions[0].vehicle_name = "Bluefin"
+        missions[0].save()
+        for m in missions[1:]:
+            m.vehicle_name = "Other"
+            m.save()
+
+    url = reverse("mission-select-api")
+    params = {**_MONTEREY_BBOX}
+    response = client.get(url, params)
+    assert response.status_code == 200
+    data = response.json()
+    all_in_bbox = data["missions"]
+    assert len(all_in_bbox) >= 1
+
+    params["vehicle_name"] = "Bluefin"
+    response_filtered = client.get(url, params)
+    assert response_filtered.status_code == 200
+    filtered = response_filtered.json()["missions"]
+    assert len(filtered) <= len(all_in_bbox)
+    assert len(filtered) >= 1
+    for m in filtered:
+        assert m.get("vehicle_name") == "Bluefin"
+
+
+def test_mission_select_api_applies_platformtype_filter(client, missions_notes_5):
+    """Draw Square API respects platformtype: bbox + platformtype returns only missions on that platform type."""
+    from smdb.models import Mission
+
+    # Use a platformtype that fixture missions actually have (mission -> platform -> platformtype), if any.
+    mission = (
+        Mission.objects.select_related("platform__platformtype")
+        .filter(platform__isnull=False, platform__platformtype__isnull=False)
+        .first()
+    )
+    if mission is None:
+        pytest.skip(
+            "missions_notes_5 fixture does not include any missions with a platform and platformtype; "
+            "skipping platformtype filter test."
+        )
+    platformtype_pk = mission.platform.platformtype_id
+
+    url = reverse("mission-select-api")
+    params = {**_MONTEREY_BBOX}
+    response = client.get(url, params)
+    assert response.status_code == 200
+    data = response.json()
+    all_in_bbox = data["missions"]
+
+    params["platformtype"] = str(platformtype_pk)
+    response_filtered = client.get(url, params)
+    assert response_filtered.status_code == 200
+    filtered = response_filtered.json()["missions"]
+
+    # Applying a filter should not increase the number of missions, and should return at least one.
+    assert len(filtered) <= len(all_in_bbox)
+    assert len(filtered) >= 1
+
+
+def test_mission_table_view_region_name_and_bbox(client, missions_notes_5):
+    """Missions page: region_name filter + bbox returns only matching missions in table."""
+    from smdb.models import Mission
+
+    # Set region_name on missions so we can filter.
+    missions = list(Mission.objects.all()[:2])
+    if len(missions) >= 2:
+        missions[0].region_name = "Monterey"
+        missions[0].save()
+        missions[1].region_name = "Other"
+        missions[1].save()
+
+    url = reverse("missions")
+    params = {**_MONTEREY_BBOX, "region_name": "Monterey"}
+    response = client.get(url, params)
+    assert response.status_code == 200
+    object_list = list(response.context.get("object_list", []))
+    for m in object_list:
+        assert m.region_name == "Monterey"
+
+
+def test_mission_export_api_applies_vehicle_name_filter(client, missions_notes_5):
+    """Export API accepts vehicle_name (and other sidebar filters) with bbox; no 500."""
+    from smdb.models import Mission
+
+    if Mission.objects.exists():
+        Mission.objects.update(vehicle_name="MAUV1")
+    url = reverse("mission-export-api")
+    params = {**_MONTEREY_BBOX, "vehicle_name": "MAUV1", "format": "csv"}
+    response = client.get(url, params)
+    assert response.status_code == 200
 
 
 # -------- Issue #290: 3D Citations -------------------------------------------
@@ -305,3 +417,67 @@ def test_survey_tally_load_citations(missions_notes_5):
     assert mission.citations.count() == 2
     with_ref = Citation.objects.get(doi="10.5678/def")
     assert with_ref.full_reference == "A reference"
+
+
+# ---------------------------------------------------------------------------
+# per_page=ALL and default pagination tests (PR: Show ALL option)
+# ---------------------------------------------------------------------------
+
+def test_missions_per_page_all(client, missions_notes_5):
+    """?per_page=ALL on the Missions page returns 200 and renders all rows."""
+    from smdb.models import Mission
+    url = reverse("missions")
+    response = client.get(url, {"per_page": "ALL"})
+    assert response.status_code == 200
+    table = response.context["table"]
+    rows = list(table.paginated_rows)
+    assert len(rows) == Mission.objects.count()
+
+
+def test_missions_default_shows_all(client, missions_notes_5):
+    """Missions page with no per_page renders all rows by default (get_table_pagination returns False)."""
+    from smdb.models import Mission
+    url = reverse("missions")
+    response = client.get(url)
+    assert response.status_code == 200
+    table = response.context["table"]
+    rows = list(table.paginated_rows)
+    assert len(rows) == Mission.objects.count()
+
+
+def test_missions_numeric_per_page(client, missions_notes_5):
+    """Explicit ?per_page=2 paginates to 2 rows on the Missions page."""
+    url = reverse("missions")
+    response = client.get(url, {"per_page": "2"})
+    assert response.status_code == 200
+    table = response.context["table"]
+    rows = list(table.paginated_rows)
+    assert len(rows) == 2
+
+
+def test_expeditions_per_page_all_no_500(client):
+    """?per_page=ALL on the Expeditions page must not raise a 500 (no bare int() crash)."""
+    url = reverse("expeditions")
+    response = client.get(url, {"per_page": "ALL"})
+    assert response.status_code == 200
+
+
+def test_compilations_per_page_all_no_500(client):
+    """?per_page=ALL on the Compilations page must not raise a 500 (no bare int() crash)."""
+    url = reverse("compilations")
+    response = client.get(url, {"per_page": "ALL"})
+    assert response.status_code == 200
+
+
+def test_expeditions_bbox_no_500(client):
+    """bbox params on the Expeditions page must not raise a FieldError (mission vs missions)."""
+    url = reverse("expeditions")
+    response = client.get(url, {"xmin": "-180", "ymin": "-90", "xmax": "180", "ymax": "90"})
+    assert response.status_code == 200
+
+
+def test_compilations_bbox_no_500(client):
+    """bbox params on the Compilations page must not raise a 500."""
+    url = reverse("compilations")
+    response = client.get(url, {"xmin": "-180", "ymin": "-90", "xmax": "180", "ymax": "90"})
+    assert response.status_code == 200

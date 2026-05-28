@@ -145,8 +145,16 @@ class MissionFilter(FilterSet):
         widget=TextInput(attrs={"placeholder": "Expedition name contains..."}),
     )
 
+    citation_search = CharFilter(
+        method="filter_citation_search",
+        label="",
+        widget=TextInput(attrs={"placeholder": "Citation (DOI or reference) contains..."}),
+    )
+
     class Meta:
         model = Mission
+        # expedition__name and citation_search are explicit filters (declared above) and
+        # do not need to be in fields; django-filter includes them automatically.
         fields = [
             "name",
             "region_name",
@@ -159,7 +167,16 @@ class MissionFilter(FilterSet):
             "citation",
             "expedition__name",
         ]
-    
+
+    @staticmethod
+    def filter_citation_search(queryset, name, value):
+        """Filter missions that have at least one citation matching DOI or full_reference (icontains)."""
+        if not value or not value.strip():
+            return queryset
+        return queryset.filter(
+            Q(citations__doi__icontains=value) | Q(citations__full_reference__icontains=value)
+        ).distinct()
+
     def filter_queryset(self, queryset):
         """
         Override to use OR logic for name and expedition__name text search fields.

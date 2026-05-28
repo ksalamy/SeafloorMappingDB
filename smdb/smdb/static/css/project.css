@@ -578,6 +578,16 @@ div,
   stroke: yellow;
 }
 
+/* Programmatic hover link (issue #293): track and row highlight together. */
+#map path.leaflet-interactive.smdb-track-line.smdb-geometry-line.smdb-hover,
+#map.smdb-baselayer-gmrt path.leaflet-interactive.smdb-track-line.smdb-geometry-line.smdb-hover,
+#map.smdb-baselayer-google-hybrid path.leaflet-interactive.smdb-track-line.smdb-geometry-line.smdb-hover {
+  stroke: yellow;
+}
+#selection-results-panel tbody tr.smdb-hover {
+  background-color: rgba(255, 255, 0, 0.25);
+}
+
 /* ----- LEAFLET-MEASURE: cursor, vertices, lines, result = green ----- */
 #map path.layer-measuredrag,
 #map circle.layer-measuredrag,
@@ -835,7 +845,13 @@ svg.svg-inline--fa,
   text-align: center;
 }
 
-/* Draw Square cursor marker - hide the dot, keep only crosshair cursor */
-.leaflet-mouse-marker {
+/* Draw Square cursor marker on main map - hide the dot, keep only crosshair cursor */
+#map .leaflet-mouse-marker {
   display: none !important; /* Remove confusing cursor dot */
+}
+
+/* Active "Show Items" per-page link in the pagination bar */
+a.per-page-active {
+  color: #d35400;
+  text-decoration: underline;
 }

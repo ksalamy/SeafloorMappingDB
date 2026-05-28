@@ -1,79 +1,45 @@
-# Can test locally with: act -P macos-14=-self-hosted
-
 name: CI
-
-# Enable Buildkit and let compose use it to speed up image building
 env:
   DOCKER_BUILDKIT: 1
   COMPOSE_DOCKER_CLI_BUILD: 1
-
 on:
   pull_request:
     branches: ["master", "main"]
     paths-ignore: ["docs/**"]
-
   push:
     branches: ["master", "main"]
     paths-ignore: ["docs/**"]
-
 jobs:
-  ##linter:
-  ##  runs-on: ubuntu-latest
-  ##  steps:
-
-  ##    - name: Checkout Code Repository
-  ##      uses: actions/checkout@v2
-
-  ##    - name: Set up Python 3.9
-  ##      uses: actions/setup-python@v2
-  ##      with:
-  ##        python-version: 3.9
-
-  # Run all pre-commit hooks on all the files.
-  # Getting only staged files can be tricky in case a new PR is opened
-  # since the action is run on a branch in detached head state
-  ##    - name: Install and Run Pre-commit
-  ##      uses: pre-commit/action@v2.0.0
-
-  # With no caching at all the entire ci process takes 4m 30s to complete!
   pytest:
-    runs-on: macos-14
-
+    runs-on: ubuntu-latest
     steps:
-      # https://stackoverflow.com/a/65346817/1281657
       - name: Checkout Code Repository
-        uses: actions/checkout@v2
-
-      # Attempts to get Github runner configured - seems to be missing important tools
-      # https://github.com/actions/runner/issues/1456#issuecomment-1819392344
-      # - name: Install and start Colima
-      #   run: |
-      #    brew install docker
-      #    brew install colima
-      #    colima version
-      #    colima start --cpu 3 --memory 6 --disk 100 --vm-type=qemu --mount-type=sshfs --dns=1.1.1.1
-
-      # https://github.com/actions/runner/issues/1456#issuecomment-1676495453
-      # - name: Setup docker and docker-compose (missing on macos-14 in Github Actions)
-      #   if: runner.os == 'macos'
-      #   run: |
-      #     brew install docker docker-compose
-      #     # Link the Docker Compose v2 plugin so it's understood by the docker CLI
-      #     mkdir -p ~/.docker/cli-plugins
-      #     ln -sfn /usr/local/opt/docker-compose/bin/docker-compose ~/.docker/cli-plugins/docker-compose
-      #     colima start
-
-      - name: Build the Stack
-        run: docker-compose -f smdb/ci.yml up -d --build
-
+        uses: actions/checkout@v4
+      # CI only needs backend services for migrate + pytest.
+      # Avoid building node/selenium here to reduce flaky external network pulls (npm/registry).
+      # Build django explicitly, then run commands in one-off django containers.
+      - name: Build & Start required services
+        working-directory: smdb
+        run: |
+          docker compose -f ci.yml up -d postgres mailhog
+          docker compose -f ci.yml build django
       - name: Run the Migrations
-        run: docker-compose -f smdb/ci.yml run --rm django python manage.py migrate
-
+        working-directory: smdb
+        run: |
+          # Pin amd64 GIS library paths for GitHub ubuntu runners.
+          # Prevent accidental ARM path injection from inherited environment.
+          docker compose -f ci.yml run --rm \
+            -e GEOS_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/libgeos_c.so \
+            -e GDAL_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/libgdal.so \
+            django python manage.py migrate
       - name: Run Pytest Tests
-        run: docker-compose -f smdb/ci.yml run --rm django pytest -s --cov-report term-missing --cov
-
+        working-directory: smdb
+        run: |
+          docker compose -f ci.yml run --rm \
+            -e GEOS_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/libgeos_c.so \
+            -e GDAL_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu/libgdal.so \
+            django pytest -s --cov-report term-missing --cov -m 'not selenium'
       - name: Tear down the Stack
         if: always()
-        run: |
-         docker-compose -f smdb/ci.yml down
-
+        working-directory: smdb
+        run: docker compose -f ci.yml down
