@@ -2663,7 +2663,7 @@ function updateResultsPanel(message, missions) {
   missions.forEach(function(mission) {
     var missionSlug = mission.slug ? String(mission.slug) : '';
     html += '<tr' + (missionSlug ? ' data-mission-slug="' + escapeHtml(missionSlug) + '"' : '') + '>';
-    html += '<td><a href="/missions/' + (missionSlug ? escapeHtml(missionSlug) : '') + '/">' + escapeHtml(mission.name) + '</a></td>';
+    html += '<td><a href="' + window.location.origin + '/missions/' + (missionSlug ? escapeHtml(missionSlug) : '') + '/">' + escapeHtml(mission.name) + '</a></td>';
     html += '<td>' + (mission.start_date || '-') + '</td>';
     html += '<td>' + (mission.region_name || '-') + '</td>';
     html += '<td>' + (mission.track_length || '-') + '</td>';
